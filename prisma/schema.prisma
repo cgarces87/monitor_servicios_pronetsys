@@ -1,0 +1,89 @@
+// Esquema Prisma para el monitor in-house de Pronetsys.
+// Fase 1: inventario de servicios, log historico de chequeos y registro de incidentes.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ServiceStatus {
+  UP
+  DOWN
+  PAUSED
+}
+
+enum MonitorType {
+  HTTP
+  TCP
+}
+
+enum Role {
+  ADMIN
+  VIEWER
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  username     String   @unique @db.VarChar(80)
+  passwordHash String   @map("password_hash") @db.VarChar(255)
+  role         Role     @default(VIEWER)
+  activo       Boolean  @default(true)
+  creadoEn     DateTime @default(now()) @map("creado_en")
+
+  @@map("users")
+}
+
+model Service {
+  id                  Int           @id @default(autoincrement())
+  nombre              String        @db.VarChar(150)
+  tipo                MonitorType   @default(HTTP)
+  url                 String?       @db.VarChar(500)        // usado si tipo = HTTP
+  host                String?       @db.VarChar(255)        // usado si tipo = TCP
+  puerto              Int?                                  // usado si tipo = TCP
+  intervaloMonitoreo  Int           @default(60) @map("intervalo_monitoreo") // en SEGUNDOS (min 15, max 86400 = 24h)
+  estadoActual        ServiceStatus @default(UP) @map("estado_actual")
+  creadoEn            DateTime      @default(now()) @map("creado_en")
+  ultimoCheckEn       DateTime?     @map("ultimo_check_en")
+
+  logs       Log[]
+  incidentes Incident[]
+
+  @@index([estadoActual])
+  @@map("services")
+}
+
+model Log {
+  id         BigInt   @id @default(autoincrement())
+  serviceId  Int      @map("service_id")
+  latenciaMs Int      @map("latencia_ms")
+  statusCode Int?     @map("status_code")
+  errorMsg   String?  @map("error_msg") @db.VarChar(500)
+  timestamp  DateTime @default(now())
+
+  service Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@index([serviceId, timestamp])
+  @@map("logs")
+}
+
+model Incident {
+  id                Int       @id @default(autoincrement())
+  serviceId         Int       @map("service_id")
+  horaCaida         DateTime  @default(now()) @map("hora_caida")
+  horaRecuperacion  DateTime? @map("hora_recuperacion")
+  detalleError      String?   @map("detalle_error") @db.VarChar(1000)
+  glpiTicketId      Int?      @map("glpi_ticket_id")
+  glpiEstado        Int?      @map("glpi_estado")              // status del ticket en GLPI (1..6)
+  glpiEstadoSyncEn  DateTime? @map("glpi_estado_sync_en")     // ultima sincronizacion desde GLPI
+
+  service Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  // Solo puede existir UN incidente abierto (horaRecuperacion = null) por servicio.
+  // Esto se aplica por logica de aplicacion en stateManager.ts.
+  @@index([serviceId, horaRecuperacion])
+  @@map("incidents")
+}

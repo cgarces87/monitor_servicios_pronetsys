@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  Tipografia activa: Montserrat (sustituta libre de Como W01 Bold), cargada y
+  auto-hospedada via @fontsource en src/main.tsx.
+
+  Para usar la Como W01 Bold real (fuente con licencia de Monotype): coloca el
+  archivo en frontend/public/fonts/ComoW01-Bold.woff2 y descomenta el bloque
+  @font-face de abajo. Como 'Como W01 Bold' ya va primera en el stack de
+  tailwind.config.js, tomara precedencia sobre Montserrat automaticamente.
+*/
+/*
+@font-face {
+  font-family: 'Como W01 Bold';
+  src:
+    url('/fonts/ComoW01-Bold.woff2') format('woff2'),
+    url('/fonts/ComoW01-Bold.woff') format('woff');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+*/
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-slate-100 text-slate-800 antialiased;
+  font-family: theme('fontFamily.sans');
+  margin: 0;
+}

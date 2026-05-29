@@ -1,0 +1,166 @@
+import { useState } from 'react';
+import { api } from './api/client';
+import { usePolling } from './hooks/usePolling';
+import { AuthProvider, useAuth } from './auth/AuthContext';
+import { Header } from './components/Header';
+import { LoginPage } from './components/LoginPage';
+import { SummaryCards } from './components/SummaryCards';
+import { ServiceList } from './components/ServiceList';
+import { ServiceFormModal } from './components/ServiceFormModal';
+import { IncidentList } from './components/IncidentList';
+import { UserManager } from './components/UserManager';
+import { TVMode } from './components/TVMode';
+import { formatearFecha } from './utils/format';
+import type { ServicioResumen } from './types';
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <Root />
+    </AuthProvider>
+  );
+}
+
+function Root() {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="flex min-h-full items-center justify-center text-slate-400">
+        Cargando…
+      </div>
+    );
+  }
+
+  if (!user) return <LoginPage />;
+  return <Dashboard />;
+}
+
+type Vista = 'panel' | 'usuarios' | 'tv';
+
+function Dashboard() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'ADMIN';
+
+  const [vista, setVista] = useState<Vista>('panel');
+  const summary = usePolling(api.summary, 30_000);
+  const servicios = usePolling(api.services, 30_000);
+  const incidentes = usePolling(() => api.incidents(false), 30_000);
+
+  const [modalAbierto, setModalAbierto] = useState(false);
+  const [editando, setEditando] = useState<ServicioResumen | null>(null);
+
+  const refrescar = (): void => {
+    servicios.refetch();
+    summary.refetch();
+  };
+
+  const abrirCrear = (): void => {
+    setEditando(null);
+    setModalAbierto(true);
+  };
+  const abrirEditar = (s: ServicioResumen): void => {
+    setEditando(s);
+    setModalAbierto(true);
+  };
+  const alGuardar = (): void => {
+    setModalAbierto(false);
+    refrescar();
+  };
+
+  const hayError = summary.error || servicios.error || incidentes.error;
+
+  return (
+    <div className="min-h-full">
+      <Header />
+
+      <nav className="border-b border-slate-200 bg-white">
+        <div className="mx-auto flex max-w-7xl gap-1 px-4">
+          <NavTab activo={vista === 'panel'} onClick={() => setVista('panel')} label="Panel" />
+          <NavTab activo={vista === 'tv'} onClick={() => setVista('tv')} label="Modo TV" />
+          {isAdmin && (
+            <NavTab activo={vista === 'usuarios'} onClick={() => setVista('usuarios')} label="Usuarios" />
+          )}
+        </div>
+      </nav>
+
+      <main className="mx-auto max-w-7xl space-y-8 px-4 py-6">
+        {vista === 'panel' ? (
+          <>
+            {hayError && (
+              <div className="rounded-lg bg-red-100 px-4 py-3 text-sm text-red-800 ring-1 ring-red-200">
+                Error de conexion con la API: {summary.error || servicios.error || incidentes.error}
+              </div>
+            )}
+
+            <section>
+              <SummaryCards summary={summary.data} />
+            </section>
+
+            <section>
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-xl text-slate-800">Servicios</h2>
+                <div className="flex items-center gap-3">
+                  <span className="hidden text-xs font-normal text-slate-400 sm:inline">
+                    Actualizado: {formatearFecha(summary.data?.ts ?? null)}
+                  </span>
+                  {isAdmin && (
+                    <button
+                      onClick={abrirCrear}
+                      className="rounded-lg bg-brand px-3 py-1.5 text-sm text-white hover:bg-brand-dark"
+                    >
+                      + Agregar servicio
+                    </button>
+                  )}
+                </div>
+              </div>
+              <ServiceList
+                servicios={servicios.data}
+                loading={servicios.loading}
+                isAdmin={isAdmin}
+                onEdit={abrirEditar}
+                onChanged={refrescar}
+              />
+            </section>
+
+            <section>
+              <h2 className="mb-3 text-xl text-slate-800">Incidentes recientes</h2>
+              <IncidentList incidentes={incidentes.data} />
+            </section>
+          </>
+        ) : vista === 'usuarios' ? (
+          isAdmin && <UserManager />
+        ) : null}
+      </main>
+
+      <footer className="mx-auto max-w-7xl px-4 py-6 text-center text-xs font-normal text-slate-400">
+        Monitor de Servicios Pronetsys · monitor.pronetsys.com.co
+      </footer>
+
+      {modalAbierto && (
+        <ServiceFormModal
+          initial={editando}
+          onClose={() => setModalAbierto(false)}
+          onSaved={alGuardar}
+        />
+      )}
+
+      {vista === 'tv' && <TVMode onExit={() => setVista('panel')} />}
+    </div>
+  );
+}
+
+function NavTab({ activo, onClick, label }: { activo: boolean; onClick: () => void; label: string }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`border-b-2 px-4 py-3 text-sm transition ${
+        activo
+          ? 'border-brand text-brand'
+          : 'border-transparent font-normal text-slate-500 hover:text-slate-800'
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
