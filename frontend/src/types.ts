@@ -39,6 +39,8 @@ export interface WhatsappRecipient {
   bienvenidaEnviada: boolean;
   bienvenidaEn: string | null;
   creadoEn: string;
+  // IDs de los servicios suscritos. Vacio = catch-all (recibe alertas de todos).
+  serviceIds: number[];
 }
 
 export interface BotInfo {

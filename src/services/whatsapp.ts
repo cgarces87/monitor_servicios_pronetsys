@@ -102,9 +102,15 @@ class WhatsAppClient {
     if (evento === 'caida' && !c.notificarCaida) return 0;
     if (evento === 'recuperacion' && !c.notificarRecuperacion) return 0;
 
-    const dest = await obtenerDestinatariosActivos();
+    // Si la alerta corresponde a un servicio especifico, filtramos por
+    // suscripciones; si no, mandamos a todos los activos.
+    const dest = extra?.serviceId
+      ? await obtenerDestinatariosParaServicio(extra.serviceId)
+      : await obtenerDestinatariosActivos();
     if (dest.length === 0) {
-      log.warn('WhatsApp sin destinatarios activos; omito alerta.');
+      log.warn('WhatsApp sin destinatarios activos para este servicio; omito alerta.', {
+        serviceId: extra?.serviceId ?? null,
+      });
       return 0;
     }
 
@@ -240,6 +246,24 @@ export async function obtenerConfig(): Promise<NotificacionConfig> {
 
 export async function obtenerDestinatariosActivos(): Promise<WhatsappRecipient[]> {
   return prisma.whatsappRecipient.findMany({ where: { activo: true }, orderBy: { id: 'asc' } });
+}
+
+/**
+ * Destinatarios activos que deben recibir alertas de un servicio especifico.
+ * Regla: si un destinatario NO tiene suscripciones (catch-all) -> incluido.
+ *        Si tiene suscripciones -> incluido solo si tiene a este servicio.
+ */
+export async function obtenerDestinatariosParaServicio(serviceId: number): Promise<WhatsappRecipient[]> {
+  return prisma.whatsappRecipient.findMany({
+    where: {
+      activo: true,
+      OR: [
+        { servicios: { none: {} } },
+        { servicios: { some: { serviceId } } },
+      ],
+    },
+    orderBy: { id: 'asc' },
+  });
 }
 
 /**

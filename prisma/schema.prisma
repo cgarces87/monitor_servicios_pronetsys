@@ -74,7 +74,24 @@ model WhatsappRecipient {
   bienvenidaEn      DateTime? @map("bienvenida_en")
   creadoEn          DateTime  @default(now()) @map("creado_en")
 
+  servicios WhatsappRecipientService[]   // si esta vacio = catch-all (recibe alertas de todos)
+
   @@map("whatsapp_recipients")
+}
+
+// Suscripcion de un destinatario a un servicio especifico.
+// Si un destinatario NO tiene filas aqui -> recibe alertas de TODOS los servicios.
+// Si tiene filas -> solo recibe de los servicios listados.
+model WhatsappRecipientService {
+  recipientId Int @map("recipient_id")
+  serviceId   Int @map("service_id")
+
+  recipient WhatsappRecipient @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+  service   Service           @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@id([recipientId, serviceId])
+  @@index([serviceId])
+  @@map("whatsapp_recipient_services")
 }
 
 model User {
@@ -100,8 +117,9 @@ model Service {
   creadoEn            DateTime      @default(now()) @map("creado_en")
   ultimoCheckEn       DateTime?     @map("ultimo_check_en")
 
-  logs       Log[]
-  incidentes Incident[]
+  logs                 Log[]
+  incidentes           Incident[]
+  destinatariosWhatsapp WhatsappRecipientService[]
 
   @@index([estadoActual])
   @@map("services")

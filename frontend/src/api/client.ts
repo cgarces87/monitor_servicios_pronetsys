@@ -102,10 +102,12 @@ export const api = {
   updateWhatsappConfig: (data: Partial<Omit<NotificacionConfig, 'id' | 'actualizadoEn'>>) =>
     request<NotificacionConfig>('PUT', '/notifications/whatsapp', data),
   whatsappRecipients: () => request<WhatsappRecipient[]>('GET', '/notifications/whatsapp/recipients'),
-  addWhatsappRecipient: (data: { numero: string; etiqueta?: string }) =>
+  addWhatsappRecipient: (data: { numero: string; etiqueta?: string; serviceIds?: number[] }) =>
     request<WhatsappRecipient>('POST', '/notifications/whatsapp/recipients', data),
-  updateWhatsappRecipient: (id: number, data: { activo?: boolean; etiqueta?: string | null }) =>
-    request<WhatsappRecipient>('PATCH', `/notifications/whatsapp/recipients/${id}`, data),
+  updateWhatsappRecipient: (
+    id: number,
+    data: { activo?: boolean; etiqueta?: string | null; serviceIds?: number[] },
+  ) => request<WhatsappRecipient>('PATCH', `/notifications/whatsapp/recipients/${id}`, data),
   deleteWhatsappRecipient: (id: number) =>
     request<{ ok: boolean; id: number }>('DELETE', `/notifications/whatsapp/recipients/${id}`),
   testWhatsapp: (texto: string, numero?: string) =>

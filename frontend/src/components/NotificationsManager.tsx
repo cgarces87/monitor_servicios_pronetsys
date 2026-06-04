@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { api } from '../api/client';
-import type { BotInfo, NotificacionConfig, ResultadoEnvioWhatsApp, TipoEnvioWhatsapp, WhatsappEnvio, WhatsappRecipient } from '../types';
+import type { BotInfo, NotificacionConfig, ResultadoEnvioWhatsApp, ServicioResumen, TipoEnvioWhatsapp, WhatsappEnvio, WhatsappRecipient } from '../types';
 import { formatearFecha } from '../utils/format';
 
 export function NotificationsManager() {
@@ -201,17 +201,27 @@ function EventosForm({
 function Destinatarios({ dest, onChanged }: { dest: WhatsappRecipient[] | null; onChanged: () => Promise<void> }) {
   const [numero, setNumero] = useState('');
   const [etiqueta, setEtiqueta] = useState('');
+  const [seleccion, setSeleccion] = useState<Set<number>>(new Set());
   const [agregando, setAgregando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [accionId, setAccionId] = useState<number | null>(null);
   const [botPhone, setBotPhone] = useState<string | null>(null);
+  const [servicios, setServicios] = useState<ServicioResumen[]>([]);
+  const [editandoSubs, setEditandoSubs] = useState<WhatsappRecipient | null>(null);
 
   useEffect(() => {
-    api
-      .whatsappBotInfo()
-      .then((i) => setBotPhone(i.phone))
-      .catch(() => setBotPhone(null));
+    api.whatsappBotInfo().then((i) => setBotPhone(i.phone)).catch(() => setBotPhone(null));
+    api.services().then(setServicios).catch(() => setServicios([]));
   }, []);
+
+  const toggleServicio = (id: number): void => {
+    setSeleccion((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const agregar = async (e: FormEvent): Promise<void> => {
     e.preventDefault();
@@ -223,14 +233,17 @@ function Destinatarios({ dest, onChanged }: { dest: WhatsappRecipient[] | null; 
     // el link de WhatsApp pre-formateado.
     const popup = botPhone ? window.open('about:blank', '_blank') : null;
     const etqLimpia = etiqueta.trim();
+    const serviceIds = Array.from(seleccion);
 
     try {
       const creado = await api.addWhatsappRecipient({
         numero: numero.trim(),
         etiqueta: etqLimpia || undefined,
+        serviceIds: serviceIds.length > 0 ? serviceIds : undefined,
       });
       setNumero('');
       setEtiqueta('');
+      setSeleccion(new Set());
       await onChanged();
 
       if (popup && botPhone) {
@@ -276,18 +289,51 @@ function Destinatarios({ dest, onChanged }: { dest: WhatsappRecipient[] | null; 
     <div className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
       <h3 className="mb-4 text-base text-slate-800">Destinatarios</h3>
 
-      <form onSubmit={agregar} className="mb-4 flex flex-wrap items-end gap-2">
-        <div className="flex-1 min-w-[180px]">
-          <label className="mb-1 block text-xs font-normal text-slate-500">Numero (codigo pais + numero)</label>
-          <input className={inputCls} value={numero} onChange={(e) => setNumero(e.target.value)} placeholder="573001112233" required />
+      <form onSubmit={agregar} className="mb-4 space-y-3">
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="flex-1 min-w-[180px]">
+            <label className="mb-1 block text-xs font-normal text-slate-500">Numero (codigo pais + numero)</label>
+            <input className={inputCls} value={numero} onChange={(e) => setNumero(e.target.value)} placeholder="573001112233" required />
+          </div>
+          <div className="flex-1 min-w-[180px]">
+            <label className="mb-1 block text-xs font-normal text-slate-500">Etiqueta (opcional)</label>
+            <input className={inputCls} value={etiqueta} onChange={(e) => setEtiqueta(e.target.value)} placeholder="Soporte / Cristian / ..." />
+          </div>
         </div>
-        <div className="flex-1 min-w-[180px]">
-          <label className="mb-1 block text-xs font-normal text-slate-500">Etiqueta (opcional)</label>
-          <input className={inputCls} value={etiqueta} onChange={(e) => setEtiqueta(e.target.value)} placeholder="Soporte / Cristian / ..." />
+
+        <div>
+          <label className="mb-1 block text-xs font-normal text-slate-500">
+            Servicios a notificar — si no marcas ninguno, recibira alertas de TODOS los servicios.
+          </label>
+          {servicios.length === 0 ? (
+            <p className="text-xs font-normal text-slate-400">No hay servicios registrados aun.</p>
+          ) : (
+            <div className="grid max-h-40 grid-cols-1 gap-1 overflow-auto rounded-lg border border-slate-200 p-2 sm:grid-cols-2">
+              {servicios.map((s) => (
+                <label key={s.id} className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-sm hover:bg-slate-50">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4"
+                    checked={seleccion.has(s.id)}
+                    onChange={() => toggleServicio(s.id)}
+                  />
+                  <span className="truncate text-slate-700">{s.nombre}</span>
+                </label>
+              ))}
+            </div>
+          )}
+          <p className="mt-1 text-xs font-normal text-slate-400">
+            {seleccion.size === 0
+              ? 'Sin seleccion: recibira alertas de TODOS los servicios.'
+              : `Seleccionados: ${seleccion.size} servicio(s).`}
+          </p>
         </div>
-        <button type="submit" disabled={agregando} className="rounded-lg bg-brand px-4 py-2 text-sm text-white hover:bg-brand-dark disabled:opacity-60">
-          {agregando ? 'Agregando…' : '+ Agregar'}
-        </button>
+
+        <div className="flex justify-end">
+          <button type="submit" disabled={agregando} className="rounded-lg bg-brand px-4 py-2 text-sm text-white hover:bg-brand-dark disabled:opacity-60">
+            {agregando ? 'Agregando…' : '+ Agregar'}
+          </button>
+        </div>
       </form>
 
       {error && (
@@ -300,13 +346,14 @@ function Destinatarios({ dest, onChanged }: { dest: WhatsappRecipient[] | null; 
             <th className="py-2">Numero</th>
             <th className="py-2">Etiqueta</th>
             <th className="py-2">Activacion</th>
+            <th className="py-2">Servicios</th>
             <th className="py-2">Estado</th>
             <th className="py-2 text-right">Acciones</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
           {!dest || dest.length === 0 ? (
-            <tr><td colSpan={5} className="py-3 text-slate-400">Sin destinatarios.</td></tr>
+            <tr><td colSpan={6} className="py-3 text-slate-400">Sin destinatarios.</td></tr>
           ) : (
             dest.map((d) => (
               <tr key={d.id}>
@@ -324,10 +371,28 @@ function Destinatarios({ dest, onChanged }: { dest: WhatsappRecipient[] | null; 
                   )}
                 </td>
                 <td className="py-2">
+                  {d.serviceIds.length === 0 ? (
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600" title="Recibe alertas de todos los servicios">
+                      Todos
+                    </span>
+                  ) : (
+                    <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700" title={d.serviceIds.map((id) => servicios.find((s) => s.id === id)?.nombre ?? `#${id}`).join(', ')}>
+                      {d.serviceIds.length} servicio{d.serviceIds.length === 1 ? '' : 's'}
+                    </span>
+                  )}
+                </td>
+                <td className="py-2">
                   {d.activo ? <span className="text-estado-up">Activo</span> : <span className="text-slate-400">Inactivo</span>}
                 </td>
                 <td className="py-2">
                   <div className="flex justify-end gap-2">
+                    <button
+                      onClick={() => setEditandoSubs(d)}
+                      disabled={accionId === d.id}
+                      className="rounded-lg border border-slate-300 px-2.5 py-1 text-xs font-normal text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+                    >
+                      Suscripciones
+                    </button>
                     <button
                       onClick={() => void toggle(d)}
                       disabled={accionId === d.id}
@@ -349,6 +414,118 @@ function Destinatarios({ dest, onChanged }: { dest: WhatsappRecipient[] | null; 
           )}
         </tbody>
       </table>
+
+      {editandoSubs && (
+        <SuscripcionesModal
+          recipient={editandoSubs}
+          servicios={servicios}
+          onClose={() => setEditandoSubs(null)}
+          onSaved={async () => {
+            setEditandoSubs(null);
+            await onChanged();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function SuscripcionesModal({
+  recipient,
+  servicios,
+  onClose,
+  onSaved,
+}: {
+  recipient: WhatsappRecipient;
+  servicios: ServicioResumen[];
+  onClose: () => void;
+  onSaved: () => Promise<void>;
+}) {
+  const [seleccion, setSeleccion] = useState<Set<number>>(new Set(recipient.serviceIds));
+  const [guardando, setGuardando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const toggle = (id: number): void => {
+    setSeleccion((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const guardar = async (): Promise<void> => {
+    setError(null);
+    setGuardando(true);
+    try {
+      await api.updateWhatsappRecipient(recipient.id, { serviceIds: Array.from(seleccion) });
+      await onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4" onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <h3 className="mb-1 text-lg text-slate-800">Suscripciones</h3>
+        <p className="mb-3 text-sm font-normal text-slate-500">
+          {recipient.etiqueta ?? recipient.numero}
+          {recipient.etiqueta ? <span className="text-slate-400"> · {recipient.numero}</span> : null}
+        </p>
+
+        <p className="mb-3 text-xs font-normal text-slate-500">
+          Si no marcas ninguno, recibira alertas de TODOS los servicios.
+        </p>
+
+        {servicios.length === 0 ? (
+          <p className="text-sm font-normal text-slate-400">No hay servicios registrados.</p>
+        ) : (
+          <div className="mb-3 grid max-h-72 grid-cols-1 gap-1 overflow-auto rounded-lg border border-slate-200 p-2">
+            {servicios.map((s) => (
+              <label key={s.id} className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-sm hover:bg-slate-50">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4"
+                  checked={seleccion.has(s.id)}
+                  onChange={() => toggle(s.id)}
+                />
+                <span className="truncate text-slate-700">{s.nombre}</span>
+              </label>
+            ))}
+          </div>
+        )}
+
+        <p className="mb-3 text-xs font-normal text-slate-400">
+          {seleccion.size === 0
+            ? 'Sin seleccion: recibira alertas de TODOS los servicios.'
+            : `Seleccionados: ${seleccion.size} servicio(s).`}
+        </p>
+
+        {error && (
+          <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-200">{error}</div>
+        )}
+
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-normal text-slate-600 hover:bg-slate-50"
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            onClick={() => void guardar()}
+            disabled={guardando}
+            className="rounded-lg bg-brand px-4 py-2 text-sm text-white hover:bg-brand-dark disabled:opacity-60"
+          >
+            {guardando ? 'Guardando…' : 'Guardar'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

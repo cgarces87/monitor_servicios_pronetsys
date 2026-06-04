@@ -73,10 +73,24 @@ export async function registrarRutasNotificaciones(app: FastifyInstance): Promis
   // --- Destinatarios ---
 
   app.get('/api/notifications/whatsapp/recipients', soloAdmin, async () => {
-    return prisma.whatsappRecipient.findMany({ orderBy: { id: 'asc' } });
+    const filas = await prisma.whatsappRecipient.findMany({
+      orderBy: { id: 'asc' },
+      include: { servicios: { select: { serviceId: true } } },
+    });
+    // Aplanar las suscripciones a un array de ids para el frontend.
+    return filas.map((r) => ({
+      id: r.id,
+      numero: r.numero,
+      etiqueta: r.etiqueta,
+      activo: r.activo,
+      bienvenidaEnviada: r.bienvenidaEnviada,
+      bienvenidaEn: r.bienvenidaEn,
+      creadoEn: r.creadoEn,
+      serviceIds: r.servicios.map((s) => s.serviceId),
+    }));
   });
 
-  app.post<{ Body: { numero?: string; etiqueta?: string } }>(
+  app.post<{ Body: { numero?: string; etiqueta?: string; serviceIds?: number[] } }>(
     '/api/notifications/whatsapp/recipients',
     soloAdmin,
     async (req, reply) => {
@@ -85,12 +99,25 @@ export async function registrarRutasNotificaciones(app: FastifyInstance): Promis
       if (numero.length < 7 || numero.length > 20) {
         return reply.code(400).send({ error: 'numero invalido (7-20 digitos, solo numeros con codigo de pais)' });
       }
-      const creado = await prisma.whatsappRecipient.create({ data: { numero, etiqueta } });
-      return reply.code(201).send(creado);
+
+      const serviceIds = await validarServiceIds(req.body?.serviceIds);
+      if (typeof serviceIds === 'string') return reply.code(400).send({ error: serviceIds });
+
+      const creado = await prisma.whatsappRecipient.create({
+        data: {
+          numero,
+          etiqueta,
+          servicios: { create: serviceIds.map((sid) => ({ serviceId: sid })) },
+        },
+      });
+      return reply.code(201).send({ ...creado, serviceIds });
     },
   );
 
-  app.patch<{ Params: { id: string }; Body: { activo?: boolean; etiqueta?: string | null } }>(
+  app.patch<{
+    Params: { id: string };
+    Body: { activo?: boolean; etiqueta?: string | null; serviceIds?: number[] };
+  }>(
     '/api/notifications/whatsapp/recipients/:id',
     soloAdmin,
     async (req, reply) => {
@@ -100,16 +127,65 @@ export async function registrarRutasNotificaciones(app: FastifyInstance): Promis
       const existe = await prisma.whatsappRecipient.findUnique({ where: { id } });
       if (!existe) return reply.code(404).send({ error: 'destinatario no encontrado' });
 
-      const actualizado = await prisma.whatsappRecipient.update({
-        where: { id },
-        data: {
-          activo: req.body?.activo,
-          etiqueta: req.body?.etiqueta === undefined ? undefined : (req.body.etiqueta ?? null),
-        },
+      // Si vienen serviceIds, reemplazamos las suscripciones (sino, las dejamos como estaban).
+      let nuevasSubs: number[] | null = null;
+      if (req.body?.serviceIds !== undefined) {
+        const v = await validarServiceIds(req.body.serviceIds);
+        if (typeof v === 'string') return reply.code(400).send({ error: v });
+        nuevasSubs = v;
+      }
+
+      const actualizado = await prisma.$transaction(async (tx) => {
+        await tx.whatsappRecipient.update({
+          where: { id },
+          data: {
+            activo: req.body?.activo,
+            etiqueta: req.body?.etiqueta === undefined ? undefined : (req.body.etiqueta ?? null),
+          },
+        });
+        if (nuevasSubs !== null) {
+          await tx.whatsappRecipientService.deleteMany({ where: { recipientId: id } });
+          if (nuevasSubs.length > 0) {
+            await tx.whatsappRecipientService.createMany({
+              data: nuevasSubs.map((sid) => ({ recipientId: id, serviceId: sid })),
+            });
+          }
+        }
+        return tx.whatsappRecipient.findUnique({
+          where: { id },
+          include: { servicios: { select: { serviceId: true } } },
+        });
       });
-      return actualizado;
+
+      if (!actualizado) return reply.code(404).send({ error: 'destinatario no encontrado' });
+      return {
+        id: actualizado.id,
+        numero: actualizado.numero,
+        etiqueta: actualizado.etiqueta,
+        activo: actualizado.activo,
+        bienvenidaEnviada: actualizado.bienvenidaEnviada,
+        bienvenidaEn: actualizado.bienvenidaEn,
+        creadoEn: actualizado.creadoEn,
+        serviceIds: actualizado.servicios.map((s) => s.serviceId),
+      };
     },
   );
+
+  // Devuelve number[] (ids unicos validos existentes) o string con mensaje de error.
+  async function validarServiceIds(ids: number[] | undefined): Promise<number[] | string> {
+    if (!ids || ids.length === 0) return [];
+    if (!Array.isArray(ids)) return 'serviceIds debe ser un array de numeros';
+    const unicos = Array.from(new Set(ids.filter((n) => Number.isInteger(n) && n > 0)));
+    if (unicos.length === 0) return [];
+    const existentes = await prisma.service.findMany({
+      where: { id: { in: unicos } },
+      select: { id: true },
+    });
+    if (existentes.length !== unicos.length) {
+      return `Uno o mas servicios no existen (recibidos: ${unicos.length}, validos: ${existentes.length})`;
+    }
+    return unicos;
+  }
 
   app.delete<{ Params: { id: string } }>(
     '/api/notifications/whatsapp/recipients/:id',
