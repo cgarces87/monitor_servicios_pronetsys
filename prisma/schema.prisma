@@ -26,6 +26,57 @@ enum Role {
   VIEWER
 }
 
+// Configuracion de notificaciones (singleton, fila id=1).
+model NotificacionConfig {
+  id                    Int      @id @default(1)
+  whatsappEnabled       Boolean  @default(false) @map("whatsapp_enabled")
+  whatsappApiUrl        String?  @map("whatsapp_api_url") @db.VarChar(500)
+  whatsappApiKey        String?  @map("whatsapp_api_key") @db.VarChar(500)
+  whatsappSessionId     String?  @map("whatsapp_session_id") @db.VarChar(255)
+  whatsappChatSuffix    String   @default("@c.us") @map("whatsapp_chat_suffix") @db.VarChar(20)
+  whatsappTimeoutMs     Int      @default(15000) @map("whatsapp_timeout_ms")
+  notificarCaida        Boolean  @default(true) @map("notificar_caida")
+  notificarRecuperacion Boolean  @default(true) @map("notificar_recuperacion")
+  actualizadoEn         DateTime @default(now()) @updatedAt @map("actualizado_en")
+
+  @@map("notificacion_config")
+}
+
+enum TipoEnvioWhatsapp {
+  CAIDA
+  RECUPERACION
+  PRUEBA
+  BIENVENIDA
+}
+
+model WhatsappEnvio {
+  id                   Int               @id @default(autoincrement())
+  tipo                 TipoEnvioWhatsapp
+  destinatarioNumero   String            @map("destinatario_numero") @db.VarChar(20)
+  destinatarioEtiqueta String?           @map("destinatario_etiqueta") @db.VarChar(80)
+  texto                String            @db.VarChar(4000)
+  exitoso              Boolean
+  errorMsg             String?           @map("error_msg") @db.VarChar(500)
+  serviceId            Int?              @map("service_id")     // sin FK: queremos historial aunque se borre el servicio
+  incidentId           Int?              @map("incident_id")
+  timestamp            DateTime          @default(now())
+
+  @@index([timestamp])
+  @@map("whatsapp_envios")
+}
+
+model WhatsappRecipient {
+  id                Int       @id @default(autoincrement())
+  numero            String    @db.VarChar(20)             // codigo pais + numero, sin signos
+  etiqueta          String?   @db.VarChar(80)             // nombre opcional
+  activo            Boolean   @default(true)
+  bienvenidaEnviada Boolean   @default(false) @map("bienvenida_enviada") // true cuando se le confirmo la activacion
+  bienvenidaEn      DateTime? @map("bienvenida_en")
+  creadoEn          DateTime  @default(now()) @map("creado_en")
+
+  @@map("whatsapp_recipients")
+}
+
 model User {
   id           Int      @id @default(autoincrement())
   username     String   @unique @db.VarChar(80)

@@ -1,12 +1,17 @@
 import type {
+  BotInfo,
   Incidente,
+  ListaEnvios,
   LogPunto,
+  NotificacionConfig,
+  ResultadoEnvioWhatsApp,
   Role,
   ServicioResumen,
   Summary,
   UptimeStats,
   User,
   UserAdmin,
+  WhatsappRecipient,
 } from '../types';
 
 // Rutas relativas: en dev las proxea Vite, en prod las sirve Nginx.
@@ -91,6 +96,30 @@ export const api = {
   updateUser: (id: number, data: { role?: Role; activo?: boolean; password?: string }) =>
     request<UserAdmin>('PATCH', `/users/${id}`, data),
   deleteUser: (id: number) => request<{ ok: boolean; id: number }>('DELETE', `/users/${id}`),
+
+  // --- Notificaciones WhatsApp (solo ADMIN) ---
+  whatsappConfig: () => request<NotificacionConfig>('GET', '/notifications/whatsapp'),
+  updateWhatsappConfig: (data: Partial<Omit<NotificacionConfig, 'id' | 'actualizadoEn'>>) =>
+    request<NotificacionConfig>('PUT', '/notifications/whatsapp', data),
+  whatsappRecipients: () => request<WhatsappRecipient[]>('GET', '/notifications/whatsapp/recipients'),
+  addWhatsappRecipient: (data: { numero: string; etiqueta?: string }) =>
+    request<WhatsappRecipient>('POST', '/notifications/whatsapp/recipients', data),
+  updateWhatsappRecipient: (id: number, data: { activo?: boolean; etiqueta?: string | null }) =>
+    request<WhatsappRecipient>('PATCH', `/notifications/whatsapp/recipients/${id}`, data),
+  deleteWhatsappRecipient: (id: number) =>
+    request<{ ok: boolean; id: number }>('DELETE', `/notifications/whatsapp/recipients/${id}`),
+  testWhatsapp: (texto: string, numero?: string) =>
+    request<ResultadoEnvioWhatsApp>('POST', '/notifications/whatsapp/test', { texto, numero }),
+  whatsappBotInfo: () => request<BotInfo>('GET', '/notifications/whatsapp/bot-info'),
+  whatsappLogs: (params: { limit?: number; offset?: number; tipo?: string; exitoso?: 'true' | 'false' } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.limit !== undefined) qs.set('limit', String(params.limit));
+    if (params.offset !== undefined) qs.set('offset', String(params.offset));
+    if (params.tipo) qs.set('tipo', params.tipo);
+    if (params.exitoso) qs.set('exitoso', params.exitoso);
+    const q = qs.toString();
+    return request<ListaEnvios>('GET', `/notifications/whatsapp/logs${q ? '?' + q : ''}`);
+  },
 };
 
 export interface ServicioInput {

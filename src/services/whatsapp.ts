@@ -1,4 +1,6 @@
 import axios, { AxiosError } from 'axios';
+import { NotificacionConfig, TipoEnvioWhatsapp, WhatsappRecipient } from '@prisma/client';
+import { prisma } from '../db/prisma';
 import { env } from '../config/env';
 import { log } from '../utils/logger';
 
@@ -6,100 +8,268 @@ import { log } from '../utils/logger';
  * Cliente para el gateway OpenWA (rmyndharis/OpenWA, NestJS + whatsapp-web.js).
  *
  *  Contrato:
- *    POST {WHATSAPP_API_URL}/sessions/{sessionId}/messages/send-text
- *    Header: X-API-Key: <key>
+ *    POST {apiUrl}/sessions/{sessionId}/messages/send-text
+ *    Header: X-API-Key: {apiKey}
  *    Body:   { "chatId": "<numero>@c.us", "text": "<mensaje>" }
  *
- *  - WHATSAPP_API_URL incluye el prefijo /api (ej http://IP:2785/api).
- *  - Requiere una sesion ya creada y conectada (QR escaneado) en OpenWA.
- *  - Tolerante a fallos: NUNCA lanza; si falla, logea y sigue. El monitoreo
- *    no se cae porque WhatsApp este caido o la sesion desconectada.
+ *  La configuracion se lee SIEMPRE desde la BD (singleton notificacion_config +
+ *  whatsapp_recipients), no del .env. El .env queda como fallback de PRIMERA
+ *  ejecucion para sembrar la BD (ver inicializarConfigDesdeEnv).
  *
- *  Formato de numero: codigo de pais + numero, sin signos. Ej: 573001112233.
- *  El sufijo de chat (@c.us contactos, @g.us grupos) se agrega solo.
+ *  Tolerante a fallos: NUNCA lanza; si falla, logea y sigue.
  */
+
+export type Evento = 'caida' | 'recuperacion';
+
+export type ResultadoEnvio = {
+  enviados: number;
+  fallidos: number;
+  detalles: { numero: string; ok: boolean; error?: string }[];
+};
+
+type DestinatarioMin = { numero: string; etiqueta: string | null };
+
+type ContextoEnvio = {
+  tipo: TipoEnvioWhatsapp;
+  serviceId?: number | null;
+  incidentId?: number | null;
+};
+
 class WhatsAppClient {
-  estaConfigurado(): boolean {
-    return Boolean(
-      env.whatsapp.enabled &&
-        env.whatsapp.apiUrl &&
-        env.whatsapp.apiKey &&
-        env.whatsapp.sessionId &&
-        env.whatsapp.recipients.length > 0,
-    );
+  /** True solo si la config minima de BD esta lista y hay destinatarios activos. */
+  /**
+   * Consulta a OpenWA el estado de la sesion configurada y devuelve la info
+   * util para onboarding (numero del bot, status, nombre). null si falla.
+   */
+  async obtenerInfoSesion(): Promise<{
+    phone: string;
+    status: string;
+    pushName: string | null;
+    sessionId: string;
+  } | null> {
+    const c = await obtenerConfig();
+    if (!c.whatsappApiUrl || !c.whatsappApiKey || !c.whatsappSessionId) return null;
+    const baseUrl = c.whatsappApiUrl.replace(/\/+$/, '');
+    const url = `${baseUrl}/sessions/${encodeURIComponent(c.whatsappSessionId)}`;
+    try {
+      const resp = await axios.get(url, {
+        timeout: c.whatsappTimeoutMs,
+        validateStatus: () => true,
+        headers: { 'X-API-Key': c.whatsappApiKey },
+      });
+      if (resp.status < 200 || resp.status >= 300) {
+        log.warn('OpenWA: GET session devolvio no-2xx', { httpStatus: resp.status });
+        return null;
+      }
+      const d = resp.data;
+      if (!d || typeof d.phone !== 'string') return null;
+      return {
+        phone: d.phone,
+        status: String(d.status ?? ''),
+        pushName: typeof d.pushName === 'string' ? d.pushName : null,
+        sessionId: c.whatsappSessionId,
+      };
+    } catch (err) {
+      log.warn('OpenWA: fallo al leer info de sesion', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
+  }
+
+  async estaConfigurado(): Promise<boolean> {
+    const c = await obtenerConfig();
+    if (!c.whatsappEnabled || !c.whatsappApiUrl || !c.whatsappApiKey || !c.whatsappSessionId) return false;
+    const dest = await obtenerDestinatariosActivos();
+    return dest.length > 0;
   }
 
   /**
-   * Envia un texto a todos los destinatarios configurados.
-   * Devuelve cuantos envios tuvieron exito. Nunca lanza.
+   * Envia una alerta de evento (caida o recuperacion). Respeta los flags
+   * notificarCaida / notificarRecuperacion. Devuelve el numero de envios OK.
+   * Cada intento se persiste en `whatsapp_envios` para auditoria.
    */
-  async enviarAlerta(texto: string): Promise<number> {
-    if (!this.estaConfigurado()) {
-      log.warn('WhatsApp no configurado o deshabilitado; omito alerta.', {
-        enabled: env.whatsapp.enabled,
-        tieneSesion: Boolean(env.whatsapp.sessionId),
-        destinatarios: env.whatsapp.recipients.length,
-      });
+  async enviarAlerta(
+    texto: string,
+    evento: Evento,
+    extra?: { serviceId?: number | null; incidentId?: number | null },
+  ): Promise<number> {
+    const c = await obtenerConfig();
+    if (!c.whatsappEnabled) {
+      log.warn(`WhatsApp deshabilitado; omito alerta de ${evento}.`);
+      return 0;
+    }
+    if (evento === 'caida' && !c.notificarCaida) return 0;
+    if (evento === 'recuperacion' && !c.notificarRecuperacion) return 0;
+
+    const dest = await obtenerDestinatariosActivos();
+    if (dest.length === 0) {
+      log.warn('WhatsApp sin destinatarios activos; omito alerta.');
       return 0;
     }
 
-    let enviados = 0;
-    for (const numero of env.whatsapp.recipients) {
-      const ok = await this.enviarA(numero, texto);
-      if (ok) enviados++;
+    const r = await this.enviarATodos(c, dest, texto, {
+      tipo: evento === 'caida' ? TipoEnvioWhatsapp.CAIDA : TipoEnvioWhatsapp.RECUPERACION,
+      serviceId: extra?.serviceId ?? null,
+      incidentId: extra?.incidentId ?? null,
+    });
+    log.info(`WhatsApp: alerta de ${evento} enviada a ${r.enviados}/${dest.length} destinatarios.`);
+    return r.enviados;
+  }
+
+  /**
+   * Envia un mensaje de prueba a todos los destinatarios activos (o a uno
+   * solo si se pasa `aNumero`). Ignora los flags de eventos. Devuelve detalle
+   * por destinatario para que el panel muestre quien recibio y quien no.
+   */
+  async enviarPrueba(texto: string, aNumero?: string): Promise<ResultadoEnvio> {
+    const c = await obtenerConfig();
+    if (!c.whatsappEnabled) {
+      return { enviados: 0, fallidos: 0, detalles: [] };
     }
-    log.info(`WhatsApp: alerta enviada a ${enviados}/${env.whatsapp.recipients.length} destinatarios.`);
-    return enviados;
+
+    const dest: DestinatarioMin[] = aNumero
+      ? [{ numero: aNumero, etiqueta: null }]
+      : (await obtenerDestinatariosActivos()).map((d) => ({ numero: d.numero, etiqueta: d.etiqueta }));
+
+    return this.enviarATodos(c, dest, texto, { tipo: TipoEnvioWhatsapp.PRUEBA });
   }
 
-  private url(): string {
-    return `${env.whatsapp.apiUrl}/sessions/${encodeURIComponent(env.whatsapp.sessionId)}/messages/send-text`;
+  /** Envia el mensaje de bienvenida que confirma la activacion. */
+  async enviarBienvenida(numero: string, etiqueta: string | null, texto: string): Promise<boolean> {
+    const c = await obtenerConfig();
+    if (!c.whatsappEnabled) return false;
+    const r = await this.enviarATodos(c, [{ numero, etiqueta }], texto, {
+      tipo: TipoEnvioWhatsapp.BIENVENIDA,
+    });
+    return r.enviados > 0;
   }
 
-  private async enviarA(numero: string, texto: string): Promise<boolean> {
-    const chatId = numero.includes('@') ? numero : `${numero}${env.whatsapp.chatSuffix}`;
+  private async enviarATodos(
+    c: NotificacionConfig,
+    dest: DestinatarioMin[],
+    texto: string,
+    ctx: ContextoEnvio,
+  ): Promise<ResultadoEnvio> {
+    const detalles: ResultadoEnvio['detalles'] = [];
+    for (const d of dest) {
+      const res = await this.enviarA(c, d, texto, ctx);
+      detalles.push({ numero: d.numero, ok: res.ok, error: res.error });
+    }
+    const enviados = detalles.filter((x) => x.ok).length;
+    return { enviados, fallidos: detalles.length - enviados, detalles };
+  }
+
+  private async enviarA(
+    c: NotificacionConfig,
+    d: DestinatarioMin,
+    texto: string,
+    ctx: ContextoEnvio,
+  ): Promise<{ ok: boolean; error?: string }> {
+    const numero = d.numero;
+    const chatId = numero.includes('@') ? numero : `${numero}${c.whatsappChatSuffix}`;
+    const baseUrl = (c.whatsappApiUrl ?? '').replace(/\/+$/, '');
+    const url = `${baseUrl}/sessions/${encodeURIComponent(c.whatsappSessionId ?? '')}/messages/send-text`;
+
+    let resultado: { ok: boolean; error?: string };
     try {
       const resp = await axios.post(
-        this.url(),
+        url,
         { chatId, text: texto },
         {
-          timeout: env.whatsapp.timeoutMs,
+          timeout: c.whatsappTimeoutMs,
           validateStatus: () => true,
-          headers: {
-            'Content-Type': 'application/json',
-            'X-API-Key': env.whatsapp.apiKey,
-          },
+          headers: { 'Content-Type': 'application/json', 'X-API-Key': c.whatsappApiKey ?? '' },
         },
       );
-
       if (resp.status < 200 || resp.status >= 300) {
-        log.error('WhatsApp: envio fallo (HTTP).', {
-          chatId,
-          httpStatus: resp.status,
-          data: resp.data,
-        });
-        return false;
+        const msg = `HTTP ${resp.status} ${typeof resp.data === 'object' ? JSON.stringify(resp.data) : String(resp.data)}`;
+        log.error('WhatsApp: envio fallo (HTTP).', { chatId, httpStatus: resp.status });
+        resultado = { ok: false, error: msg };
+      } else {
+        resultado = { ok: true };
       }
-      return true;
     } catch (err) {
-      this.logError(chatId, err);
-      return false;
+      const msg = axios.isAxiosError(err)
+        ? `${(err as AxiosError).code ?? 'error'}: ${(err as AxiosError).message}`
+        : err instanceof Error
+          ? err.message
+          : String(err);
+      log.error('WhatsApp: envio fallo (excepcion).', { chatId, error: msg });
+      resultado = { ok: false, error: msg };
     }
-  }
 
-  private logError(chatId: string, err: unknown): void {
-    const detalle: Record<string, unknown> = { chatId };
-    if (axios.isAxiosError(err)) {
-      const ax = err as AxiosError;
-      detalle.code = ax.code;
-      detalle.message = ax.message;
-    } else if (err instanceof Error) {
-      detalle.message = err.message;
-    } else {
-      detalle.message = String(err);
+    // Persistir log de auditoria (best-effort; nunca rompe el envio).
+    try {
+      await prisma.whatsappEnvio.create({
+        data: {
+          tipo: ctx.tipo,
+          destinatarioNumero: numero,
+          destinatarioEtiqueta: d.etiqueta,
+          texto: texto.substring(0, 4000),
+          exitoso: resultado.ok,
+          errorMsg: resultado.error ? resultado.error.substring(0, 500) : null,
+          serviceId: ctx.serviceId ?? null,
+          incidentId: ctx.incidentId ?? null,
+        },
+      });
+    } catch (e) {
+      log.warn('No se pudo persistir log de envio WhatsApp.', {
+        error: e instanceof Error ? e.message : String(e),
+      });
     }
-    log.error('WhatsApp: envio fallo (excepcion).', detalle);
+
+    return resultado;
   }
 }
 
 export const whatsapp = new WhatsAppClient();
+
+// ---------------------------------------------------------------------------
+// Helpers de configuracion en BD
+// ---------------------------------------------------------------------------
+
+const CONFIG_ID = 1;
+
+/** Obtiene la fila singleton; la crea con defaults si no existe. */
+export async function obtenerConfig(): Promise<NotificacionConfig> {
+  const existente = await prisma.notificacionConfig.findUnique({ where: { id: CONFIG_ID } });
+  if (existente) return existente;
+  return prisma.notificacionConfig.create({ data: { id: CONFIG_ID } });
+}
+
+export async function obtenerDestinatariosActivos(): Promise<WhatsappRecipient[]> {
+  return prisma.whatsappRecipient.findMany({ where: { activo: true }, orderBy: { id: 'asc' } });
+}
+
+/**
+ * Compatibilidad: en el PRIMER arranque tras migrar, si la config en BD esta
+ * vacia y el .env tiene valores antiguos de WhatsApp, los sembramos. Despues
+ * de la primera escritura por UI, el .env queda irrelevante.
+ */
+export async function inicializarConfigDesdeEnv(): Promise<void> {
+  const c = await obtenerConfig();
+  const sembrarConfig = !c.whatsappApiUrl && !c.whatsappApiKey && !c.whatsappSessionId;
+  if (sembrarConfig && (env.whatsapp.apiUrl || env.whatsapp.apiKey || env.whatsapp.sessionId)) {
+    await prisma.notificacionConfig.update({
+      where: { id: CONFIG_ID },
+      data: {
+        whatsappEnabled: env.whatsapp.enabled,
+        whatsappApiUrl: env.whatsapp.apiUrl || null,
+        whatsappApiKey: env.whatsapp.apiKey || null,
+        whatsappSessionId: env.whatsapp.sessionId || null,
+        whatsappChatSuffix: env.whatsapp.chatSuffix,
+        whatsappTimeoutMs: env.whatsapp.timeoutMs,
+      },
+    });
+    log.info('Config de WhatsApp sembrada desde .env (compat de primer arranque).');
+  }
+
+  const totalDest = await prisma.whatsappRecipient.count();
+  if (totalDest === 0 && env.whatsapp.recipients.length > 0) {
+    await prisma.whatsappRecipient.createMany({
+      data: env.whatsapp.recipients.map((n) => ({ numero: n })),
+    });
+    log.info(`Destinatarios WhatsApp sembrados desde .env: ${env.whatsapp.recipients.length}.`);
+  }
+}

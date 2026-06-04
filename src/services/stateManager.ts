@@ -81,6 +81,8 @@ async function marcarDown(service: Service, result: CheckResult): Promise<void> 
       `Detalle: ${detalle}\n` +
       `Hora: ${new Date().toLocaleString('es-CO', { timeZone: 'America/Bogota' })}\n\n` +
       `— Monitor Pronetsys`,
+    'caida',
+    { serviceId: service.id, incidentId },
   );
 }
 
@@ -125,6 +127,8 @@ async function marcarUp(service: Service, result: CheckResult): Promise<void> {
       `Duracion de la caida: ${duracion}\n` +
       `Hora: ${new Date().toLocaleString('es-CO', { timeZone: 'America/Bogota' })}\n\n` +
       `— Monitor Pronetsys`,
+    'recuperacion',
+    { serviceId: service.id, incidentId: incidente?.id ?? null },
   );
 }
 

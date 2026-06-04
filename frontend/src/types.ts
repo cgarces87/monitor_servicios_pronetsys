@@ -18,6 +18,64 @@ export interface UserAdmin {
   creadoEn: string;
 }
 
+export interface NotificacionConfig {
+  id: number;
+  whatsappEnabled: boolean;
+  whatsappApiUrl: string | null;
+  whatsappApiKey: string | null;
+  whatsappSessionId: string | null;
+  whatsappChatSuffix: string;
+  whatsappTimeoutMs: number;
+  notificarCaida: boolean;
+  notificarRecuperacion: boolean;
+  actualizadoEn: string;
+}
+
+export interface WhatsappRecipient {
+  id: number;
+  numero: string;
+  etiqueta: string | null;
+  activo: boolean;
+  bienvenidaEnviada: boolean;
+  bienvenidaEn: string | null;
+  creadoEn: string;
+}
+
+export interface BotInfo {
+  phone: string | null;
+  status: string;
+  pushName: string | null;
+  sessionId: string | null;
+}
+
+export interface ResultadoEnvioWhatsApp {
+  enviados: number;
+  fallidos: number;
+  detalles: { numero: string; ok: boolean; error?: string }[];
+}
+
+export type TipoEnvioWhatsapp = 'CAIDA' | 'RECUPERACION' | 'PRUEBA' | 'BIENVENIDA';
+
+export interface WhatsappEnvio {
+  id: number;
+  tipo: TipoEnvioWhatsapp;
+  destinatarioNumero: string;
+  destinatarioEtiqueta: string | null;
+  texto: string;
+  exitoso: boolean;
+  errorMsg: string | null;
+  serviceId: number | null;
+  incidentId: number | null;
+  timestamp: string;
+}
+
+export interface ListaEnvios {
+  total: number;
+  limit: number;
+  offset: number;
+  filas: WhatsappEnvio[];
+}
+
 export interface ServicioResumen {
   id: number;
   nombre: string;

@@ -7,6 +7,7 @@ import { registrarRutasServices } from './routes/services';
 import { registrarRutasIncidents } from './routes/incidents';
 import { registrarRutasSummary } from './routes/summary';
 import { registrarRutasUsers } from './routes/users';
+import { registrarRutasNotificaciones } from './routes/notifications';
 
 // Prisma usa BigInt en Log.id; JSON.stringify no sabe serializar BigInt.
 // Lo convertimos a number de forma global para todas las respuestas.
@@ -35,6 +36,7 @@ export async function crearServidorApi(): Promise<FastifyInstance> {
   await app.register(registrarRutasServices);
   await app.register(registrarRutasIncidents);
   await app.register(registrarRutasUsers);
+  await app.register(registrarRutasNotificaciones);
 
   return app;
 }

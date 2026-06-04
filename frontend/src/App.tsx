@@ -10,6 +10,7 @@ import { ServiceFormModal } from './components/ServiceFormModal';
 import { IncidentList } from './components/IncidentList';
 import { UserManager } from './components/UserManager';
 import { TVMode } from './components/TVMode';
+import { NotificationsManager } from './components/NotificationsManager';
 import { formatearFecha } from './utils/format';
 import type { ServicioResumen } from './types';
 
@@ -36,7 +37,7 @@ function Root() {
   return <Dashboard />;
 }
 
-type Vista = 'panel' | 'usuarios' | 'tv';
+type Vista = 'panel' | 'usuarios' | 'tv' | 'notificaciones';
 
 function Dashboard() {
   const { user } = useAuth();
@@ -78,6 +79,9 @@ function Dashboard() {
         <div className="mx-auto flex max-w-7xl gap-1 px-4">
           <NavTab activo={vista === 'panel'} onClick={() => setVista('panel')} label="Panel" />
           <NavTab activo={vista === 'tv'} onClick={() => setVista('tv')} label="Modo TV" />
+          {isAdmin && (
+            <NavTab activo={vista === 'notificaciones'} onClick={() => setVista('notificaciones')} label="Notificaciones" />
+          )}
           {isAdmin && (
             <NavTab activo={vista === 'usuarios'} onClick={() => setVista('usuarios')} label="Usuarios" />
           )}
@@ -130,6 +134,8 @@ function Dashboard() {
           </>
         ) : vista === 'usuarios' ? (
           isAdmin && <UserManager />
+        ) : vista === 'notificaciones' ? (
+          isAdmin && <NotificationsManager />
         ) : null}
       </main>
 

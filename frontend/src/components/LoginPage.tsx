@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { useAuth } from '../auth/AuthContext';
+import { ApiError } from '../api/client';
 
 export function LoginPage() {
   const { login } = useAuth();
@@ -15,8 +16,16 @@ export function LoginPage() {
     setEnviando(true);
     try {
       await login(username.trim(), password);
-    } catch {
-      setError('Usuario o contrasena incorrectos.');
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        setError('Usuario o contrasena incorrectos.');
+      } else if (err instanceof TypeError) {
+        // fetch lanza TypeError cuando no puede contactar al backend
+        setError('No hay conexion con el servidor. Verifica que el monitor este corriendo.');
+      } else {
+        const msg = err instanceof Error ? err.message : String(err);
+        setError(`No se pudo iniciar sesion: ${msg}`);
+      }
     } finally {
       setEnviando(false);
     }

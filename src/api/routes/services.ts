@@ -63,12 +63,18 @@ export async function registrarRutasServices(app: FastifyInstance): Promise<void
 
       const logs = await prisma.log.findMany({
         where: { serviceId: id, timestamp: { gte: desde } },
-        select: { latenciaMs: true, statusCode: true },
+        select: { latenciaMs: true, statusCode: true, errorMsg: true },
       });
 
       const total = logs.length;
-      const ok = logs.filter((l) => esOk(l.statusCode)).length;
-      const latencias = logs.map((l) => l.latenciaMs).filter((n) => n > 0);
+      // Un chequeo es exitoso si NO tiene errorMsg. Esto vale tanto para
+      // HTTP (statusCode 2xx/3xx, errorMsg null) como para TCP (statusCode
+      // null por naturaleza pero errorMsg null cuando el puerto responde).
+      const oks = logs.filter((l) => esOk(l));
+      const ok = oks.length;
+      // Promedio/min/max solo sobre chequeos exitosos (los fallidos suelen
+      // tener latencia = timeout y ensucian el promedio).
+      const latencias = oks.map((l) => l.latenciaMs).filter((n) => n > 0);
 
       return {
         serviceId: id,
@@ -271,6 +277,9 @@ function parseVentanaHoras(window: string | undefined): number {
   }
 }
 
-function esOk(statusCode: number | null): boolean {
-  return statusCode !== null && statusCode >= 200 && statusCode < 400;
+// Un chequeo es exitoso si no quedo errorMsg registrado. Esto cubre HTTP
+// (2xx/3xx -> errorMsg null) y TCP (puerto responde -> errorMsg null), sin
+// depender de statusCode (que para TCP siempre es null).
+function esOk(log: { errorMsg: string | null }): boolean {
+  return log.errorMsg === null;
 }

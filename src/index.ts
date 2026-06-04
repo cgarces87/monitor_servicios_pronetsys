@@ -7,6 +7,8 @@ import { ejecutarCiclo } from './services/monitor';
 import { iniciarApi } from './api/server';
 import { glpi } from './services/glpi';
 import { sincronizarEstadosGlpi } from './services/glpiSync';
+import { inicializarConfigDesdeEnv } from './services/whatsapp';
+import { iniciarEventosWhatsApp, detenerEventosWhatsApp } from './services/whatsappEvents';
 
 let ciclando = false;
 let sincronizandoGlpi = false;
@@ -55,6 +57,15 @@ async function main(): Promise<void> {
   await prisma.$queryRaw`SELECT 1`;
   log.info('Conexion a PostgreSQL OK.');
 
+  // Sembrar la config de notificaciones desde .env en el primer arranque
+  // (despues de la migracion). Tras la primera escritura por UI, el .env
+  // queda irrelevante.
+  await inicializarConfigDesdeEnv();
+
+  // Listener de eventos de WhatsApp (bienvenida automatica al activar).
+  // No bloqueante: si la sesion aun no esta lista, reintenta cada 30s.
+  void iniciarEventosWhatsApp();
+
   // Levantar la API HTTP de lectura (si esta habilitada).
   apiServer = await iniciarApi();
 
@@ -80,6 +91,7 @@ main().catch(async (err) => {
 // Apagado limpio
 const apagar = async (signal: string) => {
   log.info(`Recibida senal ${signal}. Cerrando conexiones...`);
+  detenerEventosWhatsApp();
   if (apiServer) await apiServer.close().catch(() => undefined);
   await prisma.$disconnect();
   process.exit(0);
