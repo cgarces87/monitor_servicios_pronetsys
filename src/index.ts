@@ -7,7 +7,7 @@ import { ejecutarCiclo } from './services/monitor';
 import { iniciarApi } from './api/server';
 import { glpi } from './services/glpi';
 import { sincronizarEstadosGlpi } from './services/glpiSync';
-import { inicializarConfigDesdeEnv } from './services/whatsapp';
+import { inicializarConfigDesdeEnv, backfillBienvenidasDesdeHistorial } from './services/whatsapp';
 import { iniciarEventosWhatsApp, detenerEventosWhatsApp } from './services/whatsappEvents';
 
 let ciclando = false;
@@ -61,6 +61,10 @@ async function main(): Promise<void> {
   // (despues de la migracion). Tras la primera escritura por UI, el .env
   // queda irrelevante.
   await inicializarConfigDesdeEnv();
+
+  // Repara la bandera "bienvenidaEnviada" para los destinatarios que ya
+  // tienen envios exitosos historicos (cubre los pendientes "huerfanos").
+  await backfillBienvenidasDesdeHistorial();
 
   // Listener de eventos de WhatsApp (bienvenida automatica al activar).
   // No bloqueante: si la sesion aun no esta lista, reintenta cada 30s.

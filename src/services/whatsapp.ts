@@ -225,6 +225,22 @@ class WhatsAppClient {
       });
     }
 
+    // Self-heal de la bandera bienvenidaEnviada: si el envio fue OK y el
+    // destinatario figuraba como "Pendiente", lo marcamos activado. Cubre los
+    // casos en que el listener de Socket.IO no atrapo el primer mensaje del
+    // destinatario (gateway desconectado, recipient creado antes del listener,
+    // conversacion calentada por fuera del flujo wa.me, etc).
+    if (resultado.ok) {
+      try {
+        await prisma.whatsappRecipient.updateMany({
+          where: { numero, bienvenidaEnviada: false },
+          data: { bienvenidaEnviada: true, bienvenidaEn: new Date() },
+        });
+      } catch {
+        /* silencioso: la consistencia es nice-to-have */
+      }
+    }
+
     return resultado;
   }
 }
@@ -264,6 +280,40 @@ export async function obtenerDestinatariosParaServicio(serviceId: number): Promi
     },
     orderBy: { id: 'asc' },
   });
+}
+
+/**
+ * Marca como "activados" (bienvenidaEnviada=true) a los destinatarios que
+ * tienen al menos un envio exitoso historico en whatsapp_envios. Cubre los
+ * casos en que el listener de Socket.IO no atrapo el primer mensaje (porque
+ * el destinatario se creo antes del listener, la sesion estaba reiniciada,
+ * etc). Se ejecuta una vez al arranque; idempotente.
+ */
+export async function backfillBienvenidasDesdeHistorial(): Promise<void> {
+  const pendientes = await prisma.whatsappRecipient.findMany({
+    where: { bienvenidaEnviada: false },
+    select: { id: true, numero: true },
+  });
+  if (pendientes.length === 0) return;
+
+  let actualizados = 0;
+  for (const p of pendientes) {
+    const primerExito = await prisma.whatsappEnvio.findFirst({
+      where: { destinatarioNumero: p.numero, exitoso: true },
+      select: { timestamp: true },
+      orderBy: { timestamp: 'asc' },
+    });
+    if (primerExito) {
+      await prisma.whatsappRecipient.update({
+        where: { id: p.id },
+        data: { bienvenidaEnviada: true, bienvenidaEn: primerExito.timestamp },
+      });
+      actualizados++;
+    }
+  }
+  if (actualizados > 0) {
+    log.info(`Backfill bienvenidas: ${actualizados} destinatario(s) marcados como activados a partir del historial.`);
+  }
 }
 
 /**
