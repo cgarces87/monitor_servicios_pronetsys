@@ -21,7 +21,7 @@ export function Header() {
             <img
               src="/logo.png?v=2"
               alt="Pronetsys"
-              className="h-12 w-auto"
+              className="h-20 w-auto"
               onError={() => setLogoFallo(true)}
             />
           ) : (
