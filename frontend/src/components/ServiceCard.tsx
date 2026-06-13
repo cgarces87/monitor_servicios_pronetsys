@@ -16,6 +16,7 @@ interface Props {
 export function ServiceCard({ servicio, isAdmin, onEdit, onChanged }: Props) {
   const [uptime, setUptime] = useState<UptimeStats | null>(null);
   const [accionEnCurso, setAccionEnCurso] = useState(false);
+  const [incidentesAbierto, setIncidentesAbierto] = useState(false);
 
   useEffect(() => {
     let activo = true;
@@ -86,11 +87,19 @@ export function ServiceCard({ servicio, isAdmin, onEdit, onChanged }: Props) {
         Ultimo check: {formatearFecha(servicio.ultimoCheckEn)}
       </div>
 
-      <div className="border-t border-slate-100 px-4 py-3">
-        <div className="mb-2 text-[10px] font-normal uppercase tracking-wide text-slate-500">
-          Incidentes
-        </div>
-        <ServiceIncidents serviceId={servicio.id} limit={5} />
+      <div className="border-t border-slate-100 px-4 py-2">
+        <button
+          type="button"
+          onClick={() => setIncidentesAbierto((v) => !v)}
+          className="text-xs font-normal text-brand hover:underline"
+        >
+          {incidentesAbierto ? '▲ Ocultar incidentes' : '▼ Ver incidentes de este servicio'}
+        </button>
+        {incidentesAbierto && (
+          <div className="mt-2">
+            <ServiceIncidents serviceId={servicio.id} limit={5} />
+          </div>
+        )}
       </div>
 
       {isAdmin && (
