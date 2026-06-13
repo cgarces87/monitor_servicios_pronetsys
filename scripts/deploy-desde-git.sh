@@ -4,8 +4,7 @@
 #
 #  Workflow esperado:
 #     [Windows]   git push origin main
-#     [VPS]       cd /opt/monitor_servicios_pronetsys
-#                 bash scripts/deploy-desde-git.sh
+#     [VPS]       bash /opt/monitor_servicios_pronetsys/scripts/deploy-desde-git.sh
 #
 #  Que hace, en orden:
 #    1) git fetch + reset --hard origin/main   (descarta cambios sin commit)
@@ -20,7 +19,11 @@
 
 set -euo pipefail
 
-APP_DIR="${APP_DIR:-$(pwd)}"
+# Detectamos la raiz del proyecto a partir de la ubicacion del script
+# (../ desde scripts/), asi puede ejecutarse desde cualquier cwd. APP_DIR
+# se puede sobreescribir por env var si hace falta apuntar a otra ruta.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_DIR="${APP_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 RAMA="${RAMA:-main}"
 SERVICIO="${SERVICIO:-monitor-pronetsys}"
 
