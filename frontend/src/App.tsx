@@ -12,7 +12,9 @@ import { UserManager } from './components/UserManager';
 import { TVMode } from './components/TVMode';
 import { NotificationsManager } from './components/NotificationsManager';
 import { formatearFecha } from './utils/format';
-import type { ServicioResumen } from './types';
+import type { EstadoServicio, ServicioResumen } from './types';
+
+const ORDEN_ESTADO: Record<EstadoServicio, number> = { DOWN: 0, UP: 1, PAUSED: 2 };
 
 export default function App() {
   return (
@@ -50,6 +52,34 @@ function Dashboard() {
 
   const [modalAbierto, setModalAbierto] = useState(false);
   const [editando, setEditando] = useState<ServicioResumen | null>(null);
+
+  // Filtros activados por click en las tarjetas del resumen.
+  const [filtroEstado, setFiltroEstado] = useState<EstadoServicio | null>(null);
+  const [filtroIncidentesAbiertos, setFiltroIncidentesAbiertos] = useState(false);
+
+  const toggleFiltroEstado = (estado: 'DOWN' | 'PAUSED'): void => {
+    setFiltroEstado((prev) => (prev === estado ? null : estado));
+  };
+  const toggleFiltroIncidentes = (): void => {
+    setFiltroIncidentesAbiertos((prev) => !prev);
+  };
+
+  // Ordenamos siempre por estado (DOWN primero, luego UP, luego PAUSED) y
+  // dentro de cada grupo, alfabetico. Aplicamos despues el filtro si esta activo.
+  const serviciosOrdenados = (servicios.data ?? [])
+    .slice()
+    .sort(
+      (a, b) =>
+        ORDEN_ESTADO[a.estadoActual] - ORDEN_ESTADO[b.estadoActual] ||
+        a.nombre.localeCompare(b.nombre),
+    );
+  const serviciosVisibles = filtroEstado
+    ? serviciosOrdenados.filter((s) => s.estadoActual === filtroEstado)
+    : serviciosOrdenados;
+
+  const incidentesVisibles = filtroIncidentesAbiertos
+    ? (incidentes.data ?? []).filter((i) => i.abierto)
+    : incidentes.data;
 
   const refrescar = (): void => {
     servicios.refetch();
@@ -98,7 +128,13 @@ function Dashboard() {
             )}
 
             <section>
-              <SummaryCards summary={summary.data} />
+              <SummaryCards
+                summary={summary.data}
+                filtroEstado={filtroEstado}
+                filtroIncidentesAbiertos={filtroIncidentesAbiertos}
+                onToggleFiltroEstado={toggleFiltroEstado}
+                onToggleFiltroIncidentes={toggleFiltroIncidentes}
+              />
             </section>
 
             <section>
@@ -118,18 +154,52 @@ function Dashboard() {
                   )}
                 </div>
               </div>
-              <ServiceList
-                servicios={servicios.data}
-                loading={servicios.loading}
-                isAdmin={isAdmin}
-                onEdit={abrirEditar}
-                onChanged={refrescar}
-              />
+
+              {filtroEstado && (
+                <div className="mb-2 flex items-center gap-2 text-sm">
+                  <span className="rounded-full bg-brand/10 px-3 py-1 text-brand">
+                    Mostrando solo: {filtroEstado === 'DOWN' ? 'Caidos' : 'Pausados'} ({serviciosVisibles.length})
+                  </span>
+                  <button
+                    onClick={() => setFiltroEstado(null)}
+                    className="rounded-full border border-slate-300 px-2 py-0.5 text-xs font-normal text-slate-600 hover:bg-slate-50"
+                  >
+                    Quitar filtro
+                  </button>
+                </div>
+              )}
+
+              {filtroEstado && serviciosVisibles.length === 0 ? (
+                <p className="rounded-lg bg-white px-4 py-3 text-sm text-slate-500 ring-1 ring-slate-200">
+                  No hay servicios en estado {filtroEstado === 'DOWN' ? 'caidos' : 'pausados'} en este momento.
+                </p>
+              ) : (
+                <ServiceList
+                  servicios={serviciosVisibles}
+                  loading={servicios.loading}
+                  isAdmin={isAdmin}
+                  onEdit={abrirEditar}
+                  onChanged={refrescar}
+                />
+              )}
             </section>
 
             <section>
               <h2 className="mb-3 text-xl text-slate-800">Incidentes recientes</h2>
-              <IncidentList incidentes={incidentes.data} />
+              {filtroIncidentesAbiertos && (
+                <div className="mb-2 flex items-center gap-2 text-sm">
+                  <span className="rounded-full bg-brand/10 px-3 py-1 text-brand">
+                    Mostrando solo incidentes abiertos ({incidentesVisibles?.length ?? 0})
+                  </span>
+                  <button
+                    onClick={() => setFiltroIncidentesAbiertos(false)}
+                    className="rounded-full border border-slate-300 px-2 py-0.5 text-xs font-normal text-slate-600 hover:bg-slate-50"
+                  >
+                    Quitar filtro
+                  </button>
+                </div>
+              )}
+              <IncidentList incidentes={incidentesVisibles} />
             </section>
           </>
         ) : vista === 'usuarios' ? (
