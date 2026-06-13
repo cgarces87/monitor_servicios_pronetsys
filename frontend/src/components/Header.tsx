@@ -19,7 +19,7 @@ export function Header() {
         <div className="flex items-center gap-3">
           {!logoFallo ? (
             <img
-              src="/logo.png"
+              src="/logo.png?v=2"
               alt="Pronetsys"
               className="h-9 w-auto"
               onError={() => setLogoFallo(true)}
