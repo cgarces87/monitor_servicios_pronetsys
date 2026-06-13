@@ -36,7 +36,7 @@ export function LoginPage() {
       <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-md ring-1 ring-slate-200">
         <div className="mb-6 flex justify-center">
           {!logoFallo ? (
-            <img src="/logo.png?v=2" alt="Pronetsys" className="h-10 w-auto" onError={() => setLogoFallo(true)} />
+            <img src="/logo.png?v=2" alt="Pronetsys" className="h-16 w-auto" onError={() => setLogoFallo(true)} />
           ) : (
             <span className="text-2xl text-brand">PRONETSYS</span>
           )}

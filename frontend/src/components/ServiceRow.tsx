@@ -4,6 +4,7 @@ import type { ServicioResumen, UptimeStats } from '../types';
 import { formatearFecha, formatearIntervalo, formatearLatencia, objetivoServicio } from '../utils/format';
 import { StatusBadge } from './StatusBadge';
 import { LatencyChart } from './LatencyChart';
+import { ServiceIncidents } from './ServiceIncidents';
 
 interface Props {
   servicio: ServicioResumen;
@@ -80,6 +81,13 @@ export function ServiceRow({ servicio, isAdmin, onEdit, onChanged }: Props) {
           </div>
 
           <LatencyChart serviceId={servicio.id} />
+
+          <div className="mt-4 border-t border-slate-100 pt-3">
+            <div className="mb-2 text-xs font-normal uppercase tracking-wide text-slate-500">
+              Incidentes de este servicio
+            </div>
+            <ServiceIncidents serviceId={servicio.id} />
+          </div>
 
           {isAdmin && (
             <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-100 pt-3">

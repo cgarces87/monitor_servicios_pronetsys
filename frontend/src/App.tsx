@@ -11,6 +11,7 @@ import { IncidentList } from './components/IncidentList';
 import { UserManager } from './components/UserManager';
 import { TVMode } from './components/TVMode';
 import { NotificationsManager } from './components/NotificationsManager';
+import { IncidentsView } from './components/IncidentsView';
 import { formatearFecha } from './utils/format';
 import type { EstadoServicio, ServicioResumen } from './types';
 
@@ -39,7 +40,7 @@ function Root() {
   return <Dashboard />;
 }
 
-type Vista = 'panel' | 'usuarios' | 'tv' | 'notificaciones';
+type Vista = 'panel' | 'usuarios' | 'tv' | 'notificaciones' | 'incidentes';
 
 function Dashboard() {
   const { user } = useAuth();
@@ -48,7 +49,7 @@ function Dashboard() {
   const [vista, setVista] = useState<Vista>('panel');
   const summary = usePolling(api.summary, 30_000);
   const servicios = usePolling(api.services, 30_000);
-  const incidentes = usePolling(() => api.incidents(false), 30_000);
+  const incidentes = usePolling(() => api.incidents({ limit: 20 }), 30_000);
 
   const [modalAbierto, setModalAbierto] = useState(false);
   const [editando, setEditando] = useState<ServicioResumen | null>(null);
@@ -124,6 +125,7 @@ function Dashboard() {
           <div className="flex gap-1">
             <NavTab activo={vista === 'panel'} onClick={() => setVista('panel')} label="Panel" />
             <NavTab activo={vista === 'tv'} onClick={() => setVista('tv')} label="Modo TV" />
+            <NavTab activo={vista === 'incidentes'} onClick={() => setVista('incidentes')} label="Incidentes" />
             {isAdmin && (
               <NavTab activo={vista === 'notificaciones'} onClick={() => setVista('notificaciones')} label="Notificaciones" />
             )}
@@ -203,11 +205,19 @@ function Dashboard() {
             </section>
 
             <section>
-              <h2 className="mb-3 text-xl text-slate-800">Incidentes recientes</h2>
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-xl text-slate-800">Incidentes recientes (Top 5)</h2>
+                <button
+                  onClick={() => setVista('incidentes')}
+                  className="text-sm text-brand hover:underline"
+                >
+                  Ver todos →
+                </button>
+              </div>
               {filtroIncidentesAbiertos && (
                 <div className="mb-2 flex items-center gap-2 text-sm">
                   <span className="rounded-full bg-brand/10 px-3 py-1 text-brand">
-                    Mostrando solo incidentes abiertos ({incidentesVisibles?.length ?? 0})
+                    Mostrando solo incidentes abiertos
                   </span>
                   <button
                     onClick={() => setFiltroIncidentesAbiertos(false)}
@@ -217,9 +227,11 @@ function Dashboard() {
                   </button>
                 </div>
               )}
-              <IncidentList incidentes={incidentesVisibles} />
+              <IncidentList incidentes={(incidentesVisibles ?? []).slice(0, 5)} />
             </section>
           </>
+        ) : vista === 'incidentes' ? (
+          <IncidentsView />
         ) : vista === 'usuarios' ? (
           isAdmin && <UserManager />
         ) : vista === 'notificaciones' ? (

@@ -74,8 +74,14 @@ export const api = {
   // --- Lectura ---
   summary: () => request<Summary>('GET', '/summary'),
   services: () => request<ServicioResumen[]>('GET', '/services'),
-  incidents: (soloAbiertos = false) =>
-    request<Incidente[]>('GET', `/incidents${soloAbiertos ? '?open=true' : ''}`),
+  incidents: (params: { open?: boolean; serviceId?: number; limit?: number } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.open) qs.set('open', 'true');
+    if (params.serviceId !== undefined) qs.set('serviceId', String(params.serviceId));
+    if (params.limit !== undefined) qs.set('limit', String(params.limit));
+    const q = qs.toString();
+    return request<Incidente[]>('GET', `/incidents${q ? '?' + q : ''}`);
+  },
   uptime: (id: number, window = '24h') =>
     request<UptimeStats>('GET', `/services/${id}/uptime?window=${window}`),
   logs: (id: number, limit = 100) =>

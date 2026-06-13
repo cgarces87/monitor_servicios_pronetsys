@@ -4,6 +4,7 @@ import type { ServicioResumen, UptimeStats } from '../types';
 import { formatearFecha, formatearLatencia, objetivoServicio } from '../utils/format';
 import { StatusBadge } from './StatusBadge';
 import { LatencyChart } from './LatencyChart';
+import { ServiceIncidents } from './ServiceIncidents';
 
 interface Props {
   servicio: ServicioResumen;
@@ -81,8 +82,15 @@ export function ServiceCard({ servicio, isAdmin, onEdit, onChanged }: Props) {
         />
       </div>
 
-      <div className="px-4 pb-3 pt-2 text-[11px] font-normal text-slate-400">
+      <div className="px-4 pt-2 text-[11px] font-normal text-slate-400">
         Ultimo check: {formatearFecha(servicio.ultimoCheckEn)}
+      </div>
+
+      <div className="border-t border-slate-100 px-4 py-3">
+        <div className="mb-2 text-[10px] font-normal uppercase tracking-wide text-slate-500">
+          Incidentes
+        </div>
+        <ServiceIncidents serviceId={servicio.id} limit={5} />
       </div>
 
       {isAdmin && (

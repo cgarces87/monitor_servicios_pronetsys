@@ -3,9 +3,10 @@ import { formatearDuracion, formatearFecha } from '../utils/format';
 
 interface Props {
   incidentes: Incidente[] | null;
+  mostrarServicio?: boolean; // default true; en vistas filtradas por servicio se puede ocultar
 }
 
-export function IncidentList({ incidentes }: Props) {
+export function IncidentList({ incidentes, mostrarServicio = true }: Props) {
   if (!incidentes) return <p className="text-slate-400">Cargando incidentes…</p>;
   if (incidentes.length === 0) {
     return (
@@ -20,7 +21,7 @@ export function IncidentList({ incidentes }: Props) {
       <table className="w-full text-left text-sm">
         <thead className="bg-slate-50 text-xs font-normal uppercase tracking-wide text-slate-500">
           <tr>
-            <th className="px-4 py-2">Servicio</th>
+            {mostrarServicio && <th className="px-4 py-2">Servicio</th>}
             <th className="px-4 py-2">Caida</th>
             <th className="px-4 py-2">Duracion</th>
             <th className="px-4 py-2">Estado (portal)</th>
@@ -30,10 +31,12 @@ export function IncidentList({ incidentes }: Props) {
         <tbody className="divide-y divide-slate-100">
           {incidentes.map((i) => (
             <tr key={i.id} className={i.abierto ? 'bg-red-50/50' : ''}>
-              <td className="px-4 py-2">
-                <div className="text-slate-800">{i.servicioNombre}</div>
-                <div className="truncate text-xs font-normal text-slate-400">{i.detalleError ?? ''}</div>
-              </td>
+              {mostrarServicio && (
+                <td className="px-4 py-2">
+                  <div className="text-slate-800">{i.servicioNombre}</div>
+                  <div className="truncate text-xs font-normal text-slate-400">{i.detalleError ?? ''}</div>
+                </td>
+              )}
               <td className="px-4 py-2 font-normal text-slate-600">{formatearFecha(i.horaCaida)}</td>
               <td className="px-4 py-2 font-normal text-slate-600">{formatearDuracion(i.duracionMs)}</td>
               <td className="px-4 py-2">
