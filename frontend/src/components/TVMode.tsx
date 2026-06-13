@@ -41,9 +41,12 @@ export function TVMode({ onExit }: Props) {
   return (
     <div className="fixed inset-0 z-50 overflow-auto bg-slate-900 text-white">
       <div className="flex items-center justify-between border-b border-slate-700 px-6 py-3">
-        <div className="flex items-baseline gap-4">
-          <span className="text-xl tracking-wide">PRONETSYS · Monitor</span>
-          <span className="text-sm text-slate-400">{now.toLocaleString('es-CO')}</span>
+        <div className="flex items-center gap-4">
+          <img src="/logo.png?v=2" alt="Pronetsys" className="h-12 w-auto rounded-md bg-white p-1" />
+          <div>
+            <div className="text-xl tracking-wide">Monitor de Servicios</div>
+            <div className="text-xs text-slate-400">{now.toLocaleString('es-CO')}</div>
+          </div>
         </div>
         <div className="flex items-center gap-3">
           <Chip label="Operativos" value={up} color="text-estado-up" />

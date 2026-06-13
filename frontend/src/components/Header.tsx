@@ -27,6 +27,9 @@ export function Header() {
           ) : (
             <span className="text-2xl tracking-wide text-brand">PRONETSYS</span>
           )}
+          <div className="hidden border-l border-slate-200 pl-3 sm:block">
+            <div className="text-lg text-slate-800">Monitor de Servicios</div>
+          </div>
         </div>
 
         {user && (
