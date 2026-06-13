@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from './api/client';
 import { usePolling } from './hooks/usePolling';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import { Header } from './components/Header';
 import { LoginPage } from './components/LoginPage';
 import { SummaryCards } from './components/SummaryCards';
-import { ServiceList } from './components/ServiceList';
+import { ServiceList, type VistaServicios } from './components/ServiceList';
 import { ServiceFormModal } from './components/ServiceFormModal';
 import { IncidentList } from './components/IncidentList';
 import { UserManager } from './components/UserManager';
@@ -57,6 +57,20 @@ function Dashboard() {
   const [filtroEstado, setFiltroEstado] = useState<EstadoServicio | null>(null);
   const [filtroIncidentesAbiertos, setFiltroIncidentesAbiertos] = useState(false);
 
+  // Vista lista / cuadricula, persistida en localStorage para que sobreviva
+  // recargas y vuelva a abrir donde el usuario la dejo.
+  const [vistaServicios, setVistaServicios] = useState<VistaServicios>(() => {
+    const guardado = typeof window !== 'undefined' ? localStorage.getItem('vistaServicios') : null;
+    return guardado === 'cuadricula' ? 'cuadricula' : 'lista';
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem('vistaServicios', vistaServicios);
+    } catch {
+      /* sin persistencia si el browser bloquea localStorage */
+    }
+  }, [vistaServicios]);
+
   const toggleFiltroEstado = (estado: 'DOWN' | 'PAUSED'): void => {
     setFiltroEstado((prev) => (prev === estado ? null : estado));
   };
@@ -106,14 +120,24 @@ function Dashboard() {
       <Header />
 
       <nav className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-7xl gap-1 px-4">
-          <NavTab activo={vista === 'panel'} onClick={() => setVista('panel')} label="Panel" />
-          <NavTab activo={vista === 'tv'} onClick={() => setVista('tv')} label="Modo TV" />
-          {isAdmin && (
-            <NavTab activo={vista === 'notificaciones'} onClick={() => setVista('notificaciones')} label="Notificaciones" />
-          )}
-          {isAdmin && (
-            <NavTab activo={vista === 'usuarios'} onClick={() => setVista('usuarios')} label="Usuarios" />
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-1 px-4">
+          <div className="flex gap-1">
+            <NavTab activo={vista === 'panel'} onClick={() => setVista('panel')} label="Panel" />
+            <NavTab activo={vista === 'tv'} onClick={() => setVista('tv')} label="Modo TV" />
+            {isAdmin && (
+              <NavTab activo={vista === 'notificaciones'} onClick={() => setVista('notificaciones')} label="Notificaciones" />
+            )}
+            {isAdmin && (
+              <NavTab activo={vista === 'usuarios'} onClick={() => setVista('usuarios')} label="Usuarios" />
+            )}
+          </div>
+          {isAdmin && vista === 'panel' && (
+            <button
+              onClick={abrirCrear}
+              className="my-2 rounded-lg bg-brand px-3 py-1.5 text-sm text-white hover:bg-brand-dark"
+            >
+              + Agregar servicio
+            </button>
           )}
         </div>
       </nav>
@@ -138,21 +162,14 @@ function Dashboard() {
             </section>
 
             <section>
-              <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-xl text-slate-800">Servicios</h2>
+              <div className="mb-3 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
-                  <span className="hidden text-xs font-normal text-slate-400 sm:inline">
-                    Actualizado: {formatearFecha(summary.data?.ts ?? null)}
-                  </span>
-                  {isAdmin && (
-                    <button
-                      onClick={abrirCrear}
-                      className="rounded-lg bg-brand px-3 py-1.5 text-sm text-white hover:bg-brand-dark"
-                    >
-                      + Agregar servicio
-                    </button>
-                  )}
+                  <h2 className="text-xl text-slate-800">Servicios</h2>
+                  <ToggleVista vista={vistaServicios} onChange={setVistaServicios} />
                 </div>
+                <span className="hidden text-xs font-normal text-slate-400 sm:inline">
+                  Actualizado: {formatearFecha(summary.data?.ts ?? null)}
+                </span>
               </div>
 
               {filtroEstado && (
@@ -178,6 +195,7 @@ function Dashboard() {
                   servicios={serviciosVisibles}
                   loading={servicios.loading}
                   isAdmin={isAdmin}
+                  vista={vistaServicios}
                   onEdit={abrirEditar}
                   onChanged={refrescar}
                 />
@@ -238,5 +256,31 @@ function NavTab({ activo, onClick, label }: { activo: boolean; onClick: () => vo
     >
       {label}
     </button>
+  );
+}
+
+function ToggleVista({
+  vista,
+  onChange,
+}: {
+  vista: VistaServicios;
+  onChange: (v: VistaServicios) => void;
+}) {
+  const opt = (v: VistaServicios, label: string) => (
+    <button
+      type="button"
+      onClick={() => onChange(v)}
+      className={`rounded px-2.5 py-1 text-xs transition ${
+        vista === v ? 'bg-brand text-white' : 'font-normal text-slate-600 hover:bg-slate-50'
+      }`}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <div className="flex items-center gap-0.5 rounded-lg border border-slate-300 p-0.5">
+      {opt('lista', 'Lista')}
+      {opt('cuadricula', 'Cuadricula')}
+    </div>
   );
 }

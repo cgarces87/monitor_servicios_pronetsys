@@ -12,22 +12,24 @@ import type { LogPunto } from '../types';
 
 interface Props {
   serviceId: number;
+  heightClass?: string; // tailwind h-*, default h-48
+  limit?: number;       // cuantos puntos historicos pedir
 }
 
-export function LatencyChart({ serviceId }: Props) {
+export function LatencyChart({ serviceId, heightClass = 'h-48', limit = 100 }: Props) {
   const [logs, setLogs] = useState<LogPunto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let activo = true;
     api
-      .logs(serviceId, 100)
+      .logs(serviceId, limit)
       .then((d) => activo && setLogs(d))
       .catch((e) => activo && setError(e instanceof Error ? e.message : String(e)));
     return () => {
       activo = false;
     };
-  }, [serviceId]);
+  }, [serviceId, limit]);
 
   if (error) return <p className="text-sm text-estado-down">Error cargando latencia: {error}</p>;
   if (!logs) return <p className="text-sm text-slate-400">Cargando grafico…</p>;
@@ -42,7 +44,7 @@ export function LatencyChart({ serviceId }: Props) {
   }));
 
   return (
-    <div className="h-48 w-full">
+    <div className={`${heightClass} w-full`}>
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={data} margin={{ top: 5, right: 10, bottom: 0, left: -10 }}>
           <XAxis dataKey="hora" tick={{ fontSize: 11 }} minTickGap={30} />
