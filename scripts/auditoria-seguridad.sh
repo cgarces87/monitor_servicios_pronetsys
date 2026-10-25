@@ -62,6 +62,10 @@ pendiente() { grep -E "$1" <<<"$PENDIENTES" | tr '\n' ' '; }
 # ---------------------------------------------------------------------------
 titulo "Sistema"
 info "Host: $(hostname)  |  $(. /etc/os-release && echo "$PRETTY_NAME")  |  kernel $(uname -r)"
+EDAD_LISTAS=$(( ($(date +%s) - $(stat -c %Y /var/lib/apt/lists 2>/dev/null || echo 0)) / 86400 ))
+if [ "$EDAD_LISTAS" -gt 1 ]; then
+  aviso "El indice de apt tiene $EDAD_LISTAS dias: corre 'apt update' antes para que este reporte sea fiable."
+fi
 NSEG="$(apt-get -s -o Debug::NoLocking=1 dist-upgrade 2>/dev/null | grep -c '^Inst .*security')"
 if [ "${NSEG:-0}" -gt 0 ]; then
   fallo "$NSEG paquetes con actualizacion de SEGURIDAD pendiente (apt update && apt upgrade)."
