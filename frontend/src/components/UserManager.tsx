@@ -5,6 +5,7 @@ import type { Role, UserAdmin } from '../types';
 import { formatearFecha } from '../utils/format';
 import { UserFormModal } from './UserFormModal';
 import { PasswordModal } from './PasswordModal';
+import { AnimatePresence } from 'motion/react';
 
 export function UserManager() {
   const { user } = useAuth();
@@ -81,7 +82,7 @@ export function UserManager() {
         <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-200">{error}</div>
       )}
 
-      <div className="overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
+      <div className="overflow-x-auto rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
         <table className="w-full text-left text-sm">
           <thead className="bg-slate-50 text-xs font-normal uppercase tracking-wide text-slate-500">
             <tr>
@@ -168,25 +169,29 @@ export function UserManager() {
         </table>
       </div>
 
-      {modalAbierto && (
-        <UserFormModal
-          onClose={() => setModalAbierto(false)}
-          onSaved={() => {
-            setModalAbierto(false);
-            void cargar();
-          }}
-        />
-      )}
+      <AnimatePresence>
+        {modalAbierto && (
+          <UserFormModal
+            onClose={() => setModalAbierto(false)}
+            onSaved={() => {
+              setModalAbierto(false);
+              void cargar();
+            }}
+          />
+        )}
+      </AnimatePresence>
 
-      {resetPass && (
-        <PasswordModal
-          mode="admin"
-          targetId={resetPass.id}
-          targetUsername={resetPass.username}
-          onClose={() => setResetPass(null)}
-          onSaved={() => setResetPass(null)}
-        />
-      )}
+      <AnimatePresence>
+        {resetPass && (
+          <PasswordModal
+            mode="admin"
+            targetId={resetPass.id}
+            targetUsername={resetPass.username}
+            onClose={() => setResetPass(null)}
+            onSaved={() => setResetPass(null)}
+          />
+        )}
+      </AnimatePresence>
     </section>
   );
 }

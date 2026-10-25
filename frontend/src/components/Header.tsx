@@ -7,6 +7,7 @@
 import { useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { PasswordModal } from './PasswordModal';
+import { AnimatePresence } from 'motion/react';
 
 export function Header() {
   const { user, logout } = useAuth();
@@ -56,13 +57,15 @@ export function Header() {
         )}
       </div>
 
-      {cambiarPass && (
-        <PasswordModal
-          mode="self"
-          onClose={() => setCambiarPass(false)}
-          onSaved={() => setCambiarPass(false)}
-        />
-      )}
+      <AnimatePresence>
+        {cambiarPass && (
+          <PasswordModal
+            mode="self"
+            onClose={() => setCambiarPass(false)}
+            onSaved={() => setCambiarPass(false)}
+          />
+        )}
+      </AnimatePresence>
     </header>
   );
 }

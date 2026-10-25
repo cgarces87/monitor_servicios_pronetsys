@@ -1,6 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { AnimatePresence } from 'motion/react';
+import * as m from 'motion/react-m';
 import { api } from './api/client';
 import { usePolling } from './hooks/usePolling';
+import { useLiveEvents } from './hooks/useLiveEvents';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import { Header } from './components/Header';
 import { LoginPage } from './components/LoginPage';
@@ -13,9 +16,29 @@ import { TVMode } from './components/TVMode';
 import { NotificationsManager } from './components/NotificationsManager';
 import { IncidentsView } from './components/IncidentsView';
 import { formatearFecha } from './utils/format';
-import type { EstadoServicio, ServicioResumen } from './types';
+import type { EstadoServicio, EventoMonitor, ServicioResumen } from './types';
 
 const ORDEN_ESTADO: Record<EstadoServicio, number> = { DOWN: 0, UP: 1, PAUSED: 2 };
+
+// Puntos del mini-grafico de cada tarjeta en la vista cuadricula.
+const PUNTOS_SPARKLINE = 40;
+
+/** Aplica un evento de chequeo en vivo a la lista local de servicios. */
+function aplicarCheck(lista: ServicioResumen[] | null, e: EventoMonitor): ServicioResumen[] | null {
+  if (!lista || e.tipo !== 'check') return lista;
+  return lista.map((s) => {
+    if (s.id !== e.serviceId) return s;
+    const punto = { latenciaMs: e.latenciaMs, statusCode: e.statusCode, ok: e.ok, timestamp: e.ts };
+    return {
+      ...s,
+      estadoActual: s.estadoActual === 'PAUSED' ? s.estadoActual : e.estado,
+      ultimaLatenciaMs: e.latenciaMs,
+      ultimoStatusCode: e.statusCode,
+      ultimoCheckEn: e.ts,
+      sparkline: s.sparkline ? [...s.sparkline, punto].slice(-PUNTOS_SPARKLINE) : undefined,
+    };
+  });
+}
 
 export default function App() {
   return (
@@ -47,9 +70,6 @@ function Dashboard() {
   const isAdmin = user?.role === 'ADMIN';
 
   const [vista, setVista] = useState<Vista>('panel');
-  const summary = usePolling(api.summary, 30_000);
-  const servicios = usePolling(api.services, 30_000);
-  const incidentes = usePolling(() => api.incidents({ limit: 20 }), 30_000);
 
   const [modalAbierto, setModalAbierto] = useState(false);
   const [editando, setEditando] = useState<ServicioResumen | null>(null);
@@ -71,6 +91,39 @@ function Dashboard() {
       /* sin persistencia si el browser bloquea localStorage */
     }
   }, [vistaServicios]);
+
+  // Con eventos en vivo (SSE) el panel se actualiza al instante; el polling
+  // queda como respaldo y para refrescar uptime/incidentes cada tanto.
+  const [vivo, setVivo] = useState(false);
+  const intervalo = vivo ? 60_000 : 30_000;
+  const summary = usePolling(api.summary, intervalo);
+  const servicios = usePolling(
+    () => api.services(vistaServicios === 'cuadricula' ? PUNTOS_SPARKLINE : 0),
+    intervalo,
+  );
+  const incidentes = usePolling(() => api.incidents({ limit: 20 }), intervalo);
+
+  const conectado = useLiveEvents((e) => {
+    if (e.tipo === 'check') {
+      servicios.mutate((prev) => aplicarCheck(prev, e));
+    } else {
+      // Cambio UP<->DOWN: cambian contadores, incidentes y el uptime.
+      summary.refetch();
+      incidentes.refetch();
+      servicios.refetch();
+    }
+  });
+  useEffect(() => setVivo(conectado), [conectado]);
+
+  // Al pasar a cuadricula hacen falta los sparklines: recargar ya (el primer
+  // render no, porque usePolling ya hace la carga inicial).
+  const refetchServicios = servicios.refetch;
+  const vistaPrevia = useRef(vistaServicios);
+  useEffect(() => {
+    if (vistaPrevia.current === vistaServicios) return;
+    vistaPrevia.current = vistaServicios;
+    refetchServicios();
+  }, [vistaServicios, refetchServicios]);
 
   const toggleFiltroEstado = (estado: 'DOWN' | 'PAUSED'): void => {
     setFiltroEstado((prev) => (prev === estado ? null : estado));
@@ -121,8 +174,9 @@ function Dashboard() {
       <Header />
 
       <nav className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-1 px-4">
-          <div className="flex gap-1">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-2 px-4">
+          {/* En movil las pestanas se desplazan en horizontal en vez de desbordar la pagina. */}
+          <div className="flex min-w-0 gap-1 overflow-x-auto [scrollbar-width:none]">
             <NavTab activo={vista === 'panel'} onClick={() => setVista('panel')} label="Panel" />
             <NavTab activo={vista === 'tv'} onClick={() => setVista('tv')} label="Modo TV" />
             <NavTab activo={vista === 'incidentes'} onClick={() => setVista('incidentes')} label="Incidentes" />
@@ -136,9 +190,10 @@ function Dashboard() {
           {isAdmin && vista === 'panel' && (
             <button
               onClick={abrirCrear}
-              className="my-2 rounded-lg bg-brand px-3 py-1.5 text-sm text-white hover:bg-brand-dark"
+              aria-label="Agregar servicio"
+              className="my-2 shrink-0 whitespace-nowrap rounded-lg bg-brand px-3 py-1.5 text-sm text-white hover:bg-brand-dark"
             >
-              + Agregar servicio
+              + <span className="hidden sm:inline">Agregar servicio</span>
             </button>
           )}
         </div>
@@ -169,8 +224,15 @@ function Dashboard() {
                   <h2 className="text-xl text-slate-800">Servicios</h2>
                   <ToggleVista vista={vistaServicios} onChange={setVistaServicios} />
                 </div>
-                <span className="hidden text-xs font-normal text-slate-400 sm:inline">
-                  Actualizado: {formatearFecha(summary.data?.ts ?? null)}
+                <span className="hidden items-center gap-2 text-xs font-normal text-slate-400 sm:flex">
+                  {vivo ? (
+                    <>
+                      <span className="h-1.5 w-1.5 rounded-full bg-estado-up" aria-hidden="true" />
+                      En vivo
+                    </>
+                  ) : (
+                    <>Actualizado: {formatearFecha(summary.data?.ts ?? null)}</>
+                  )}
                 </span>
               </div>
 
@@ -243,15 +305,24 @@ function Dashboard() {
         Monitor de Servicios Pronetsys · monitor.pronetsys.com.co
       </footer>
 
-      {modalAbierto && (
-        <ServiceFormModal
-          initial={editando}
-          onClose={() => setModalAbierto(false)}
-          onSaved={alGuardar}
+      <AnimatePresence>
+        {modalAbierto && (
+          <ServiceFormModal
+            initial={editando}
+            onClose={() => setModalAbierto(false)}
+            onSaved={alGuardar}
+          />
+        )}
+      </AnimatePresence>
+
+      {vista === 'tv' && (
+        <TVMode
+          servicios={servicios.data}
+          loading={servicios.loading}
+          error={servicios.error}
+          onExit={() => setVista('panel')}
         />
       )}
-
-      {vista === 'tv' && <TVMode onExit={() => setVista('panel')} />}
     </div>
   );
 }
@@ -260,13 +331,20 @@ function NavTab({ activo, onClick, label }: { activo: boolean; onClick: () => vo
   return (
     <button
       onClick={onClick}
-      className={`border-b-2 px-4 py-3 text-sm transition ${
-        activo
-          ? 'border-brand text-brand'
-          : 'border-transparent font-normal text-slate-500 hover:text-slate-800'
+      aria-current={activo ? 'page' : undefined}
+      className={`relative shrink-0 whitespace-nowrap px-4 py-3 text-sm transition-colors ${
+        activo ? 'text-brand' : 'font-normal text-slate-500 hover:text-slate-800'
       }`}
     >
       {label}
+      {/* Un solo subrayado que se desliza entre pestanas (layoutId). */}
+      {activo && (
+        <m.span
+          layoutId="pestana-activa"
+          className="absolute inset-x-0 bottom-0 h-0.5 bg-brand"
+          transition={{ duration: 0.25, ease: [0.77, 0, 0.175, 1] }}
+        />
+      )}
     </button>
   );
 }

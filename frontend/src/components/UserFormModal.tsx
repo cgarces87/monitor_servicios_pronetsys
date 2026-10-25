@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { api } from '../api/client';
 import type { Role } from '../types';
+import { ModalShell } from './ModalShell';
 
 interface Props {
   onClose: () => void;
@@ -32,68 +33,66 @@ export function UserFormModal({ onClose, onSaved }: Props) {
     'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4" onClick={onClose}>
-      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <h2 className="mb-4 text-lg text-slate-800">Crear usuario</h2>
+    <ModalShell onClose={onClose}>
+      <h2 className="mb-4 text-lg text-slate-800">Crear usuario</h2>
 
-        <form onSubmit={onSubmit} className="space-y-4">
-          <div>
-            <label className="mb-1 block text-sm font-normal text-slate-600">Usuario</label>
-            <input
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              className={inputCls}
-              required
-              minLength={3}
-              maxLength={80}
-              autoComplete="off"
-            />
+      <form onSubmit={onSubmit} className="space-y-4">
+        <div>
+          <label className="mb-1 block text-sm font-normal text-slate-600">Usuario</label>
+          <input
+            type="text"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            className={inputCls}
+            required
+            minLength={3}
+            maxLength={80}
+            autoComplete="off"
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-normal text-slate-600">Contrasena</label>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className={inputCls}
+            required
+            minLength={6}
+            autoComplete="new-password"
+          />
+          <p className="mt-1 text-xs font-normal text-slate-400">Minimo 6 caracteres.</p>
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-normal text-slate-600">Rol</label>
+          <div className="flex gap-2">
+            <RoleBtn activo={role === 'VIEWER'} onClick={() => setRole('VIEWER')} label="Lector" sub="Solo ve el panel" />
+            <RoleBtn activo={role === 'ADMIN'} onClick={() => setRole('ADMIN')} label="Admin" sub="Gestiona todo" />
           </div>
-          <div>
-            <label className="mb-1 block text-sm font-normal text-slate-600">Contrasena</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className={inputCls}
-              required
-              minLength={6}
-              autoComplete="new-password"
-            />
-            <p className="mt-1 text-xs font-normal text-slate-400">Minimo 6 caracteres.</p>
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-normal text-slate-600">Rol</label>
-            <div className="flex gap-2">
-              <RoleBtn activo={role === 'VIEWER'} onClick={() => setRole('VIEWER')} label="Lector" sub="Solo ve el panel" />
-              <RoleBtn activo={role === 'ADMIN'} onClick={() => setRole('ADMIN')} label="Admin" sub="Gestiona todo" />
-            </div>
-          </div>
+        </div>
 
-          {error && (
-            <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-200">{error}</div>
-          )}
+        {error && (
+          <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-200">{error}</div>
+        )}
 
-          <div className="flex justify-end gap-2 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-normal text-slate-600 hover:bg-slate-50"
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              disabled={guardando}
-              className="rounded-lg bg-brand px-4 py-2 text-sm text-white hover:bg-brand-dark disabled:opacity-60"
-            >
-              {guardando ? 'Creando…' : 'Crear'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        <div className="flex justify-end gap-2 pt-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-normal text-slate-600 hover:bg-slate-50"
+          >
+            Cancelar
+          </button>
+          <button
+            type="submit"
+            disabled={guardando}
+            className="rounded-lg bg-brand px-4 py-2 text-sm text-white hover:bg-brand-dark disabled:opacity-60"
+          >
+            {guardando ? 'Creando…' : 'Crear'}
+          </button>
+        </div>
+      </form>
+    </ModalShell>
   );
 }
 

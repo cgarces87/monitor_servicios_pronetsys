@@ -3,6 +3,8 @@ import { QRCodeSVG } from 'qrcode.react';
 import { api } from '../api/client';
 import type { BotInfo, NotificacionConfig, ResultadoEnvioWhatsApp, ServicioResumen, TipoEnvioWhatsapp, WhatsappEnvio, WhatsappRecipient } from '../types';
 import { formatearFecha } from '../utils/format';
+import { ModalShell } from './ModalShell';
+import { AnimatePresence } from 'motion/react';
 
 export function NotificationsManager() {
   const [config, setConfig] = useState<NotificacionConfig | null>(null);
@@ -415,17 +417,19 @@ function Destinatarios({ dest, onChanged }: { dest: WhatsappRecipient[] | null; 
         </tbody>
       </table>
 
-      {editandoSubs && (
-        <SuscripcionesModal
-          recipient={editandoSubs}
-          servicios={servicios}
-          onClose={() => setEditandoSubs(null)}
-          onSaved={async () => {
-            setEditandoSubs(null);
-            await onChanged();
-          }}
-        />
-      )}
+      <AnimatePresence>
+        {editandoSubs && (
+          <SuscripcionesModal
+            recipient={editandoSubs}
+            servicios={servicios}
+            onClose={() => setEditandoSubs(null)}
+            onSaved={async () => {
+              setEditandoSubs(null);
+              await onChanged();
+            }}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -468,65 +472,63 @@ function SuscripcionesModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4" onClick={onClose}>
-      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <h3 className="mb-1 text-lg text-slate-800">Suscripciones</h3>
-        <p className="mb-3 text-sm font-normal text-slate-500">
-          {recipient.etiqueta ?? recipient.numero}
-          {recipient.etiqueta ? <span className="text-slate-400"> · {recipient.numero}</span> : null}
-        </p>
+    <ModalShell onClose={onClose}>
+      <h3 className="mb-1 text-lg text-slate-800">Suscripciones</h3>
+      <p className="mb-3 text-sm font-normal text-slate-500">
+        {recipient.etiqueta ?? recipient.numero}
+        {recipient.etiqueta ? <span className="text-slate-400"> · {recipient.numero}</span> : null}
+      </p>
 
-        <p className="mb-3 text-xs font-normal text-slate-500">
-          Si no marcas ninguno, recibira alertas de TODOS los servicios.
-        </p>
+      <p className="mb-3 text-xs font-normal text-slate-500">
+        Si no marcas ninguno, recibira alertas de TODOS los servicios.
+      </p>
 
-        {servicios.length === 0 ? (
-          <p className="text-sm font-normal text-slate-400">No hay servicios registrados.</p>
-        ) : (
-          <div className="mb-3 grid max-h-72 grid-cols-1 gap-1 overflow-auto rounded-lg border border-slate-200 p-2">
-            {servicios.map((s) => (
-              <label key={s.id} className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-sm hover:bg-slate-50">
-                <input
-                  type="checkbox"
-                  className="h-4 w-4"
-                  checked={seleccion.has(s.id)}
-                  onChange={() => toggle(s.id)}
-                />
-                <span className="truncate text-slate-700">{s.nombre}</span>
-              </label>
-            ))}
-          </div>
-        )}
-
-        <p className="mb-3 text-xs font-normal text-slate-400">
-          {seleccion.size === 0
-            ? 'Sin seleccion: recibira alertas de TODOS los servicios.'
-            : `Seleccionados: ${seleccion.size} servicio(s).`}
-        </p>
-
-        {error && (
-          <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-200">{error}</div>
-        )}
-
-        <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-normal text-slate-600 hover:bg-slate-50"
-          >
-            Cancelar
-          </button>
-          <button
-            type="button"
-            onClick={() => void guardar()}
-            disabled={guardando}
-            className="rounded-lg bg-brand px-4 py-2 text-sm text-white hover:bg-brand-dark disabled:opacity-60"
-          >
-            {guardando ? 'Guardando…' : 'Guardar'}
-          </button>
+      {servicios.length === 0 ? (
+        <p className="text-sm font-normal text-slate-400">No hay servicios registrados.</p>
+      ) : (
+        <div className="mb-3 grid max-h-72 grid-cols-1 gap-1 overflow-auto rounded-lg border border-slate-200 p-2">
+          {servicios.map((s) => (
+            <label key={s.id} className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-sm hover:bg-slate-50">
+              <input
+                type="checkbox"
+                className="h-4 w-4"
+                checked={seleccion.has(s.id)}
+                onChange={() => toggle(s.id)}
+              />
+              <span className="truncate text-slate-700">{s.nombre}</span>
+            </label>
+          ))}
         </div>
+      )}
+
+      <p className="mb-3 text-xs font-normal text-slate-400">
+        {seleccion.size === 0
+          ? 'Sin seleccion: recibira alertas de TODOS los servicios.'
+          : `Seleccionados: ${seleccion.size} servicio(s).`}
+      </p>
+
+      {error && (
+        <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-200">{error}</div>
+      )}
+
+      <div className="flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-normal text-slate-600 hover:bg-slate-50"
+        >
+          Cancelar
+        </button>
+        <button
+          type="button"
+          onClick={() => void guardar()}
+          disabled={guardando}
+          className="rounded-lg bg-brand px-4 py-2 text-sm text-white hover:bg-brand-dark disabled:opacity-60"
+        >
+          {guardando ? 'Guardando…' : 'Guardar'}
+        </button>
       </div>
-    </div>
+    </ModalShell>
   );
 }
 

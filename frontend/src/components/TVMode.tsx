@@ -1,17 +1,19 @@
 import { useEffect, useState } from 'react';
-import { api } from '../api/client';
-import { usePolling } from '../hooks/usePolling';
+import * as m from 'motion/react-m';
 import type { EstadoServicio, ServicioResumen } from '../types';
 import { formatearFecha, formatearLatencia, objetivoServicio } from '../utils/format';
 
 interface Props {
+  // Mismos datos del panel (ya actualizados en vivo por SSE).
+  servicios: ServicioResumen[] | null;
+  loading: boolean;
+  error: string | null;
   onExit: () => void;
 }
 
 const ordenEstado: Record<EstadoServicio, number> = { DOWN: 0, UP: 1, PAUSED: 2 };
 
-export function TVMode({ onExit }: Props) {
-  const servicios = usePolling(api.services, 15_000);
+export function TVMode({ servicios, loading, error, onExit }: Props) {
   const [now, setNow] = useState(new Date());
   const [fs, setFs] = useState(false);
 
@@ -30,7 +32,7 @@ export function TVMode({ onExit }: Props) {
     else void document.documentElement.requestFullscreen();
   };
 
-  const lista: ServicioResumen[] = (servicios.data ?? [])
+  const lista: ServicioResumen[] = (servicios ?? [])
     .slice()
     .sort((a, b) => ordenEstado[a.estadoActual] - ordenEstado[b.estadoActual] || a.nombre.localeCompare(b.nombre));
 
@@ -67,15 +69,15 @@ export function TVMode({ onExit }: Props) {
         </div>
       </div>
 
-      {servicios.error && (
+      {error && (
         <div className="m-6 rounded-lg bg-red-900/50 px-4 py-3 text-red-200">
-          Error de conexion: {servicios.error}
+          Error de conexion: {error}
         </div>
       )}
 
       {lista.length === 0 ? (
         <div className="p-10 text-center text-slate-400">
-          {servicios.loading ? 'Cargando…' : 'No hay servicios registrados.'}
+          {loading ? 'Cargando…' : 'No hay servicios registrados.'}
         </div>
       ) : (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3 p-6">
@@ -107,14 +109,20 @@ function Tile({ servicio }: { servicio: ServicioResumen }) {
         ? 'bg-slate-800 ring-slate-700 opacity-60'
         : 'bg-slate-800 ring-slate-700';
 
+  // layout: en la pantalla mural, una tarjeta que cae se desliza al frente y
+  // se ve de donde salio.
   return (
-    <div className={`${base} ${estilo}`}>
+    <m.div
+      layout="position"
+      transition={{ layout: { duration: 0.3, ease: [0.77, 0, 0.175, 1] } }}
+      className={`${base} ${estilo} transition-colors duration-300`}
+    >
       <div>
         <div className="flex items-start justify-between gap-2">
           <span className="text-lg leading-tight">{servicio.nombre}</span>
           <span
             className={`mt-1 h-3 w-3 flex-shrink-0 rounded-full ${
-              estado === 'DOWN' ? 'animate-pulse bg-white' : estado === 'PAUSED' ? 'bg-slate-500' : 'bg-estado-up'
+              estado === 'DOWN' ? 'bg-white motion-safe:animate-pulse' : estado === 'PAUSED' ? 'bg-slate-500' : 'bg-estado-up'
             }`}
           />
         </div>
@@ -132,6 +140,6 @@ function Tile({ servicio }: { servicio: ServicioResumen }) {
           <div className="text-[10px] text-slate-400">{formatearFecha(servicio.ultimoCheckEn)}</div>
         </span>
       </div>
-    </div>
+    </m.div>
   );
 }

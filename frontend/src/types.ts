@@ -91,6 +91,10 @@ export interface ServicioResumen {
   ultimoCheckEn: string | null;
   ultimaLatenciaMs: number | null;
   ultimoStatusCode: number | null;
+  // Estadisticas de las ultimas 24h (null si aun no hay muestras).
+  uptime24h: Omit<UptimeStats, 'serviceId' | 'ventanaHoras'> | null;
+  // Ultimos N puntos de latencia; solo viene si se pidio ?sparkline=N.
+  sparkline?: LogPunto[];
 }
 
 export interface Summary {
@@ -131,5 +135,19 @@ export interface UptimeStats {
 export interface LogPunto {
   latenciaMs: number;
   statusCode: number | null;
+  ok: boolean;
   timestamp: string;
 }
+
+// Eventos en vivo que el motor empuja por /api/stream (SSE).
+export type EventoMonitor =
+  | {
+      tipo: 'check';
+      serviceId: number;
+      estado: EstadoServicio;
+      latenciaMs: number;
+      statusCode: number | null;
+      ok: boolean;
+      ts: string;
+    }
+  | { tipo: 'transicion'; serviceId: number; estado: EstadoServicio };

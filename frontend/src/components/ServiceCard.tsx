@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { api } from '../api/client';
-import type { ServicioResumen, UptimeStats } from '../types';
+import type { ServicioResumen } from '../types';
 import { formatearFecha, formatearLatencia, objetivoServicio } from '../utils/format';
 import { StatusBadge } from './StatusBadge';
 import { LatencyChart } from './LatencyChart';
@@ -14,20 +14,11 @@ interface Props {
 }
 
 export function ServiceCard({ servicio, isAdmin, onEdit, onChanged }: Props) {
-  const [uptime, setUptime] = useState<UptimeStats | null>(null);
+  // Uptime y sparkline llegan con /api/services (y se refrescan en vivo):
+  // la tarjeta ya no hace peticiones propias.
+  const uptime = servicio.uptime24h;
   const [accionEnCurso, setAccionEnCurso] = useState(false);
   const [incidentesAbierto, setIncidentesAbierto] = useState(false);
-
-  useEffect(() => {
-    let activo = true;
-    api
-      .uptime(servicio.id, '24h')
-      .then((d) => activo && setUptime(d))
-      .catch(() => activo && setUptime(null));
-    return () => {
-      activo = false;
-    };
-  }, [servicio.id]);
 
   const pausarReanudar = async (): Promise<void> => {
     setAccionEnCurso(true);
@@ -66,7 +57,7 @@ export function ServiceCard({ servicio, isAdmin, onEdit, onChanged }: Props) {
       </div>
 
       <div className="px-2 pt-2">
-        <LatencyChart serviceId={servicio.id} heightClass="h-32" limit={40} />
+        <LatencyChart serviceId={servicio.id} heightClass="h-32" limit={40} data={servicio.sparkline} />
       </div>
 
       <div className="grid grid-cols-2 gap-2 px-4 pt-1 text-xs">

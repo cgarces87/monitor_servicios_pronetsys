@@ -37,7 +37,10 @@ type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 async function request<T>(method: Method, path: string, body?: unknown): Promise<T> {
   const resp = await fetch(`${BASE}${path}`, {
     method,
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    // Content-Type solo si hay cuerpo: Fastify rechaza (400) un JSON vacio.
+    headers: body !== undefined
+      ? { 'Content-Type': 'application/json', Accept: 'application/json' }
+      : { Accept: 'application/json' },
     credentials: 'include',
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
@@ -73,7 +76,8 @@ export const api = {
 
   // --- Lectura ---
   summary: () => request<Summary>('GET', '/summary'),
-  services: () => request<ServicioResumen[]>('GET', '/services'),
+  services: (sparkline = 0) =>
+    request<ServicioResumen[]>('GET', `/services${sparkline > 0 ? `?sparkline=${sparkline}` : ''}`),
   incidents: (params: { open?: boolean; serviceId?: number; limit?: number } = {}) => {
     const qs = new URLSearchParams();
     if (params.open) qs.set('open', 'true');

@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { AnimatePresence } from 'motion/react';
+import * as m from 'motion/react-m';
 import { api } from '../api/client';
-import type { ServicioResumen, UptimeStats } from '../types';
+import type { ServicioResumen } from '../types';
 import { formatearFecha, formatearIntervalo, formatearLatencia, objetivoServicio } from '../utils/format';
 import { StatusBadge } from './StatusBadge';
 import { LatencyChart } from './LatencyChart';
@@ -15,16 +17,8 @@ interface Props {
 
 export function ServiceRow({ servicio, isAdmin, onEdit, onChanged }: Props) {
   const [abierto, setAbierto] = useState(false);
-  const [uptime, setUptime] = useState<UptimeStats | null>(null);
+  const uptime = servicio.uptime24h;
   const [accionEnCurso, setAccionEnCurso] = useState(false);
-
-  useEffect(() => {
-    if (!abierto || uptime) return;
-    api
-      .uptime(servicio.id, '24h')
-      .then(setUptime)
-      .catch(() => setUptime(null));
-  }, [abierto, uptime, servicio.id]);
 
   const pausarReanudar = async (): Promise<void> => {
     setAccionEnCurso(true);
@@ -52,6 +46,7 @@ export function ServiceRow({ servicio, isAdmin, onEdit, onChanged }: Props) {
       <button
         onClick={() => setAbierto((v) => !v)}
         className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left"
+        aria-expanded={abierto}
       >
         <div className="min-w-0 flex-1">
           <div className="truncate text-base text-slate-800">{servicio.nombre}</div>
@@ -68,53 +63,69 @@ export function ServiceRow({ servicio, isAdmin, onEdit, onChanged }: Props) {
           <div>Chequeo: {formatearIntervalo(servicio.intervaloMonitoreo)}</div>
         </div>
         <StatusBadge estado={servicio.estadoActual} />
-        <span className="text-slate-400">{abierto ? '▲' : '▼'}</span>
+        <span
+          className={`text-slate-400 transition-transform duration-200 ${abierto ? 'rotate-180' : ''}`}
+          aria-hidden="true"
+        >
+          ▼
+        </span>
       </button>
 
-      {abierto && (
-        <div className="border-t border-slate-100 px-4 py-4">
-          <div className="mb-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
-            <Stat label="Uptime 24h" value={uptime?.uptimePct != null ? `${uptime.uptimePct}%` : '—'} />
-            <Stat label="Latencia prom." value={formatearLatencia(uptime?.latenciaPromedioMs ?? null)} />
-            <Stat label="Min / Max" value={uptime ? `${uptime.latenciaMinMs ?? '—'} / ${uptime.latenciaMaxMs ?? '—'} ms` : '—'} />
-            <Stat label="Muestras" value={uptime?.muestras?.toString() ?? '—'} />
-          </div>
+      <AnimatePresence initial={false}>
+        {abierto && (
+          <m.div
+            key="detalle"
+            className="overflow-hidden"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: [0.23, 1, 0.32, 1] }}
+          >
+            <div className="border-t border-slate-100 px-4 py-4">
+              <div className="mb-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+                <Stat label="Uptime 24h" value={uptime?.uptimePct != null ? `${uptime.uptimePct}%` : '—'} />
+                <Stat label="Latencia prom." value={formatearLatencia(uptime?.latenciaPromedioMs ?? null)} />
+                <Stat label="Min / Max" value={uptime ? `${uptime.latenciaMinMs ?? '—'} / ${uptime.latenciaMaxMs ?? '—'} ms` : '—'} />
+                <Stat label="Muestras" value={uptime?.muestras?.toString() ?? '—'} />
+              </div>
 
-          <LatencyChart serviceId={servicio.id} />
+              <LatencyChart serviceId={servicio.id} />
 
-          <div className="mt-4 border-t border-slate-100 pt-3">
-            <div className="mb-2 text-xs font-normal uppercase tracking-wide text-slate-500">
-              Incidentes de este servicio
+              <div className="mt-4 border-t border-slate-100 pt-3">
+                <div className="mb-2 text-xs font-normal uppercase tracking-wide text-slate-500">
+                  Incidentes de este servicio
+                </div>
+                <ServiceIncidents serviceId={servicio.id} />
+              </div>
+
+              {isAdmin && (
+                <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-100 pt-3">
+                  <button
+                    onClick={() => onEdit(servicio)}
+                    className="rounded-lg border border-slate-300 px-3 py-1 text-sm font-normal text-slate-600 hover:bg-slate-50"
+                  >
+                    Editar
+                  </button>
+                  <button
+                    onClick={() => void pausarReanudar()}
+                    disabled={accionEnCurso}
+                    className="rounded-lg border border-slate-300 px-3 py-1 text-sm font-normal text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+                  >
+                    {servicio.estadoActual === 'PAUSED' ? 'Reanudar' : 'Pausar'}
+                  </button>
+                  <button
+                    onClick={() => void eliminar()}
+                    disabled={accionEnCurso}
+                    className="rounded-lg border border-red-300 px-3 py-1 text-sm font-normal text-red-600 hover:bg-red-50 disabled:opacity-60"
+                  >
+                    Eliminar
+                  </button>
+                </div>
+              )}
             </div>
-            <ServiceIncidents serviceId={servicio.id} />
-          </div>
-
-          {isAdmin && (
-            <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-100 pt-3">
-              <button
-                onClick={() => onEdit(servicio)}
-                className="rounded-lg border border-slate-300 px-3 py-1 text-sm font-normal text-slate-600 hover:bg-slate-50"
-              >
-                Editar
-              </button>
-              <button
-                onClick={() => void pausarReanudar()}
-                disabled={accionEnCurso}
-                className="rounded-lg border border-slate-300 px-3 py-1 text-sm font-normal text-slate-600 hover:bg-slate-50 disabled:opacity-60"
-              >
-                {servicio.estadoActual === 'PAUSED' ? 'Reanudar' : 'Pausar'}
-              </button>
-              <button
-                onClick={() => void eliminar()}
-                disabled={accionEnCurso}
-                className="rounded-lg border border-red-300 px-3 py-1 text-sm font-normal text-red-600 hover:bg-red-50 disabled:opacity-60"
-              >
-                Eliminar
-              </button>
-            </div>
-          )}
-        </div>
-      )}
+          </m.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
