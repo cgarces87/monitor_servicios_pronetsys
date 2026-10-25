@@ -1,3 +1,4 @@
+import './bootstrap';
 import cron from 'node-cron';
 import { FastifyInstance } from 'fastify';
 import { env } from './config/env';
@@ -9,13 +10,15 @@ import { glpi } from './services/glpi';
 import { sincronizarEstadosGlpi } from './services/glpiSync';
 import { inicializarConfigDesdeEnv, backfillBienvenidasDesdeHistorial } from './services/whatsapp';
 import { iniciarEventosWhatsApp, detenerEventosWhatsApp } from './services/whatsappEvents';
+import { purgarLogsAntiguos } from './services/retencion';
 
 let ciclando = false;
 let sincronizandoGlpi = false;
 let apiServer: FastifyInstance | null = null;
 
 async function tick(): Promise<void> {
-  // Anti-solapamiento: si un ciclo aun no termina, saltamos el siguiente.
+  // Anti-solapamiento de la consulta de vencidos. Los chequeos en si corren
+  // en segundo plano (ver monitor.ts), asi que el ciclo termina en milisegundos.
   if (ciclando) {
     log.warn('Ciclo anterior aun en ejecucion; este tick se omite.');
     return;
@@ -51,6 +54,9 @@ async function main(): Promise<void> {
     cron: env.monitorCron,
     tz: env.tz,
     httpTimeoutMs: env.httpTimeoutMs,
+    concurrencia: env.monitor.concurrencia,
+    reintentos: env.monitor.reintentos,
+    uvThreadpool: process.env.UV_THREADPOOL_SIZE,
   });
 
   // Verificar conexion a la BD antes de programar el cron.
@@ -83,6 +89,17 @@ async function main(): Promise<void> {
   if (glpi.estaConfigurado()) {
     cron.schedule(env.glpi.syncCron, () => { void tickGlpiSync(); }, { timezone: env.tz });
     log.info(`Sync de estados GLPI programado: "${env.glpi.syncCron}".`);
+  }
+
+  if (env.retencion.logsDias > 0) {
+    cron.schedule(env.retencion.cron, () => {
+      purgarLogsAntiguos().catch((err) =>
+        log.error('Fallo en la retencion de logs.', {
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    }, { timezone: env.tz });
+    log.info(`Retencion de logs: ${env.retencion.logsDias} dias ("${env.retencion.cron}").`);
   }
 }
 

@@ -38,6 +38,20 @@ export const env = {
   monitorCron: process.env.MONITOR_CRON ?? '*/15 * * * * *',
   tz: process.env.TZ ?? 'America/Bogota',
 
+  monitor: {
+    // Chequeos simultaneos como maximo (el resto espera turno en cola).
+    concurrencia: Math.max(int('MONITOR_CONCURRENCY', 10), 1),
+    // Reintentos antes de declarar CAIDO un servicio que estaba UP.
+    reintentos: Math.max(int('MONITOR_RETRIES', 2), 0),
+    esperaReintentoMs: Math.max(int('MONITOR_RETRY_DELAY_MS', 3_000), 0),
+  },
+
+  retencion: {
+    // Dias de logs de chequeo a conservar. 0 = conservar todo (por defecto).
+    logsDias: Math.max(int('LOG_RETENTION_DAYS', 0), 0),
+    cron: process.env.LOG_RETENTION_CRON ?? '0 15 3 * * *',
+  },
+
   glpi: {
     url: process.env.GLPI_URL ?? '',
     appToken: process.env.GLPI_APP_TOKEN ?? '',

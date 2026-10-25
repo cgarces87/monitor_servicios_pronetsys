@@ -8,6 +8,7 @@ import { registrarRutasIncidents } from './routes/incidents';
 import { registrarRutasSummary } from './routes/summary';
 import { registrarRutasUsers } from './routes/users';
 import { registrarRutasNotificaciones } from './routes/notifications';
+import { registrarRutaStream } from './routes/stream';
 
 // Prisma usa BigInt en Log.id; JSON.stringify no sabe serializar BigInt.
 // Lo convertimos a number de forma global para todas las respuestas.
@@ -18,7 +19,10 @@ import { registrarRutasNotificaciones } from './routes/notifications';
 };
 
 export async function crearServidorApi(): Promise<FastifyInstance> {
-  const app = Fastify({ logger: false });
+  // forceCloseConnections: las conexiones SSE (/api/stream) nunca quedan
+  // ociosas; sin esto app.close() esperaria a que cada navegador se desconecte
+  // y systemd terminaria matando el proceso con SIGKILL.
+  const app = Fastify({ logger: false, forceCloseConnections: true });
 
   await app.register(cors, {
     origin: env.api.corsOrigin === '*' ? true : env.api.corsOrigin.split(','),
@@ -37,6 +41,7 @@ export async function crearServidorApi(): Promise<FastifyInstance> {
   await app.register(registrarRutasIncidents);
   await app.register(registrarRutasUsers);
   await app.register(registrarRutasNotificaciones);
+  await app.register(registrarRutaStream);
 
   return app;
 }

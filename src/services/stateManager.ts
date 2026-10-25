@@ -4,6 +4,7 @@ import { log } from '../utils/logger';
 import type { CheckResult } from './checker';
 import { glpi } from './glpi';
 import { whatsapp } from './whatsapp';
+import { emitirEvento } from './eventos';
 
 /**
  * Aplica la transicion de estado de un servicio a partir del resultado del chequeo.
@@ -22,31 +23,34 @@ import { whatsapp } from './whatsapp';
  *    mantener filas bloqueadas en BD).
  *  - GLPI nunca rompe el flujo: si falla, el incidente queda registrado
  *    localmente con glpiTicketId = null y se logea el error.
+ *  - El cambio de estado es condicional (UPDATE ... WHERE estado = previo):
+ *    si alguien pauso el servicio mientras se chequeaba, o dos chequeos
+ *    compiten, no se aplica la transicion ni se duplican tickets/alertas.
+ *
+ * Devuelve el estado con el que queda el servicio.
  */
-export async function aplicarTransicion(service: Service, result: CheckResult): Promise<void> {
+export async function aplicarTransicion(service: Service, result: CheckResult): Promise<ServiceStatus> {
   const previo = service.estadoActual;
 
-  if (result.ok) {
-    if (previo === ServiceStatus.DOWN) {
-      await marcarUp(service, result);
-    }
-    return;
+  if (result.ok && previo === ServiceStatus.DOWN) {
+    return (await marcarUp(service, result)) ? ServiceStatus.UP : previo;
   }
-
-  if (previo === ServiceStatus.UP) {
-    await marcarDown(service, result);
+  if (!result.ok && previo === ServiceStatus.UP) {
+    return (await marcarDown(service, result)) ? ServiceStatus.DOWN : previo;
   }
+  return previo;
 }
 
-async function marcarDown(service: Service, result: CheckResult): Promise<void> {
+async function marcarDown(service: Service, result: CheckResult): Promise<boolean> {
   const detalle = result.errorMsg ?? 'Sin detalle';
 
   // 1) Persistir cambio de estado + (si aplica) abrir incidente.
   const incidentId = await prisma.$transaction(async (tx) => {
-    await tx.service.update({
-      where: { id: service.id },
+    const cambio = await tx.service.updateMany({
+      where: { id: service.id, estadoActual: ServiceStatus.UP },
       data: { estadoActual: ServiceStatus.DOWN },
     });
+    if (cambio.count === 0) return null;
 
     // Idempotencia: si ya hay un incidente abierto, lo reutilizamos.
     const abierto = await tx.incident.findFirst({
@@ -62,6 +66,15 @@ async function marcarDown(service: Service, result: CheckResult): Promise<void> 
     });
     return creado.id;
   });
+
+  if (incidentId === null) {
+    log.warn(`"${service.nombre}" cambio de estado durante el chequeo; se omite la transicion a DOWN.`, {
+      serviceId: service.id,
+    });
+    return false;
+  }
+
+  emitirEvento({ tipo: 'transicion', serviceId: service.id, estado: ServiceStatus.DOWN });
 
   log.alert(`Servicio CAIDO: "${service.nombre}" (${objetivo(service)}) -> ${detalle}`, {
     serviceId: service.id,
@@ -84,25 +97,37 @@ async function marcarDown(service: Service, result: CheckResult): Promise<void> 
     'caida',
     { serviceId: service.id, incidentId },
   );
+  return true;
 }
 
-async function marcarUp(service: Service, result: CheckResult): Promise<void> {
+async function marcarUp(service: Service, result: CheckResult): Promise<boolean> {
   // 1) Encontrar incidente abierto ANTES de cerrarlo, para guardar su ticketId.
   const incidente = await prisma.incident.findFirst({
     where: { serviceId: service.id, horaRecuperacion: null },
   });
 
   // 2) Cerrar en BD.
-  await prisma.$transaction(async (tx) => {
-    await tx.service.update({
-      where: { id: service.id },
+  const aplicado = await prisma.$transaction(async (tx) => {
+    const cambio = await tx.service.updateMany({
+      where: { id: service.id, estadoActual: ServiceStatus.DOWN },
       data: { estadoActual: ServiceStatus.UP },
     });
+    if (cambio.count === 0) return false;
     await tx.incident.updateMany({
       where: { serviceId: service.id, horaRecuperacion: null },
       data: { horaRecuperacion: new Date() },
     });
+    return true;
   });
+
+  if (!aplicado) {
+    log.warn(`"${service.nombre}" cambio de estado durante el chequeo; se omite la transicion a UP.`, {
+      serviceId: service.id,
+    });
+    return false;
+  }
+
+  emitirEvento({ tipo: 'transicion', serviceId: service.id, estado: ServiceStatus.UP });
 
   log.info(`Servicio RECUPERADO: "${service.nombre}"`, {
     serviceId: service.id,
@@ -130,6 +155,7 @@ async function marcarUp(service: Service, result: CheckResult): Promise<void> {
     'recuperacion',
     { serviceId: service.id, incidentId: incidente?.id ?? null },
   );
+  return true;
 }
 
 function formatearDuracion(ms: number): string {

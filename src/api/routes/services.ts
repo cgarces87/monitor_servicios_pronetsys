@@ -1,5 +1,18 @@
 import { FastifyInstance } from 'fastify';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma';
+
+type FilaUltimo = { serviceId: number; latenciaMs: number; statusCode: number | null };
+type FilaStats = {
+  serviceId: number;
+  muestras: number;
+  oks: number;
+  promedio: number | null;
+  minimo: number | null;
+  maximo: number | null;
+};
+type FilaSerie = FilaUltimo & { ok: boolean; timestamp: Date };
+type LogPunto = { latenciaMs: number; statusCode: number | null; ok: boolean; timestamp: Date };
 
 /**
  * Rutas de servicios:
@@ -9,36 +22,80 @@ import { prisma } from '../../db/prisma';
  *   GET /api/services/:id/logs         -> historico reciente para graficar latencia
  */
 export async function registrarRutasServices(app: FastifyInstance): Promise<void> {
-  // Lista de servicios con su ultimo log (estado + latencia mas reciente).
-  app.get('/api/services', { preHandler: [app.authenticate] }, async () => {
-    const servicios = await prisma.service.findMany({
-      orderBy: { id: 'asc' },
-      include: {
-        logs: {
-          orderBy: { timestamp: 'desc' },
-          take: 1,
-        },
-      },
-    });
+  // Lista de servicios con su ultimo log, uptime 24h y (opcional) los ultimos
+  // N puntos de latencia para el mini-grafico de cada tarjeta. Todo sale en 3
+  // consultas fijas, sin importar cuantos servicios haya: antes cada tarjeta
+  // pedia /uptime y /logs por separado (2 peticiones x servicio).
+  app.get<{ Querystring: { sparkline?: string } }>(
+    '/api/services',
+    { preHandler: [app.authenticate] },
+    async (req) => {
+      const puntos = Math.min(Math.max(Number(req.query.sparkline) || 0, 0), 100);
 
-    return servicios.map((s) => {
-      const ultimo = s.logs[0];
-      return {
-        id: s.id,
-        nombre: s.nombre,
-        tipo: s.tipo,
-        url: s.url,
-        host: s.host,
-        puerto: s.puerto,
-        intervaloMonitoreo: s.intervaloMonitoreo,
-        estadoActual: s.estadoActual,
-        creadoEn: s.creadoEn,
-        ultimoCheckEn: s.ultimoCheckEn,
-        ultimaLatenciaMs: ultimo?.latenciaMs ?? null,
-        ultimoStatusCode: ultimo?.statusCode ?? null,
-      };
-    });
-  });
+      const [servicios, ultimos, stats, series] = await Promise.all([
+        prisma.service.findMany({ orderBy: { id: 'asc' } }),
+        // LATERAL + LIMIT 1 usa el indice (service_id, timestamp) hacia atras.
+        // (Un include { logs: { take: 1 } } de Prisma trae los logs de todos
+        // los servicios y recorta en memoria: se degradaba con el historial.)
+        prisma.$queryRaw<FilaUltimo[]>`
+          SELECT s.id AS "serviceId", l.latencia_ms AS "latenciaMs", l.status_code AS "statusCode"
+          FROM services s
+          JOIN LATERAL (
+            SELECT latencia_ms, status_code FROM logs
+            WHERE service_id = s.id
+            ORDER BY "timestamp" DESC
+            LIMIT 1
+          ) l ON true`,
+        prisma.$queryRaw<FilaStats[]>`
+          SELECT s.id AS "serviceId", a.*
+          FROM services s
+          CROSS JOIN LATERAL (${sqlEstadisticas(Prisma.sql`s.id`, 24)}) a`,
+        puntos > 0
+          ? prisma.$queryRaw<FilaSerie[]>`
+              SELECT s.id AS "serviceId", p.latencia_ms AS "latenciaMs", p.status_code AS "statusCode",
+                     p.error_msg IS NULL AS ok, p."timestamp"
+              FROM services s
+              CROSS JOIN LATERAL (
+                SELECT latencia_ms, status_code, error_msg, "timestamp" FROM logs
+                WHERE service_id = s.id
+                ORDER BY "timestamp" DESC
+                LIMIT ${puntos}::int
+              ) p`
+          : Promise.resolve([] as FilaSerie[]),
+      ]);
+
+      const ultimoPor = new Map(ultimos.map((u) => [u.serviceId, u]));
+      const statsPor = new Map(stats.map((st) => [st.serviceId, st]));
+      const seriePor = new Map<number, LogPunto[]>();
+      // Vienen del mas reciente al mas viejo: unshift deja orden cronologico.
+      for (const p of series) {
+        const lista = seriePor.get(p.serviceId) ?? [];
+        lista.unshift({ latenciaMs: p.latenciaMs, statusCode: p.statusCode, ok: p.ok, timestamp: p.timestamp });
+        seriePor.set(p.serviceId, lista);
+      }
+
+      return servicios.map((s) => {
+        const ultimo = ultimoPor.get(s.id);
+        const st = statsPor.get(s.id);
+        return {
+          id: s.id,
+          nombre: s.nombre,
+          tipo: s.tipo,
+          url: s.url,
+          host: s.host,
+          puerto: s.puerto,
+          intervaloMonitoreo: s.intervaloMonitoreo,
+          estadoActual: s.estadoActual,
+          creadoEn: s.creadoEn,
+          ultimoCheckEn: s.ultimoCheckEn,
+          ultimaLatenciaMs: ultimo?.latenciaMs ?? null,
+          ultimoStatusCode: ultimo?.statusCode ?? null,
+          uptime24h: st ? formatearStats(st) : null,
+          ...(puntos > 0 ? { sparkline: seriePor.get(s.id) ?? [] } : {}),
+        };
+      });
+    },
+  );
 
   // Detalle de un servicio.
   app.get<{ Params: { id: string } }>('/api/services/:id', { preHandler: [app.authenticate] }, async (req, reply) => {
@@ -59,33 +116,17 @@ export async function registrarRutasServices(app: FastifyInstance): Promise<void
       if (!Number.isInteger(id)) return reply.code(400).send({ error: 'id invalido' });
 
       const horas = parseVentanaHoras(req.query.window);
-      const desde = new Date(Date.now() - horas * 3_600_000);
 
-      const logs = await prisma.log.findMany({
-        where: { serviceId: id, timestamp: { gte: desde } },
-        select: { latenciaMs: true, statusCode: true, errorMsg: true },
-      });
-
-      const total = logs.length;
-      // Un chequeo es exitoso si NO tiene errorMsg. Esto vale tanto para
-      // HTTP (statusCode 2xx/3xx, errorMsg null) como para TCP (statusCode
-      // null por naturaleza pero errorMsg null cuando el puerto responde).
-      const oks = logs.filter((l) => esOk(l));
-      const ok = oks.length;
-      // Promedio/min/max solo sobre chequeos exitosos (los fallidos suelen
-      // tener latencia = timeout y ensucian el promedio).
-      const latencias = oks.map((l) => l.latenciaMs).filter((n) => n > 0);
+      // Agregado en Postgres: para 30d con chequeos cada 15s son ~170k filas
+      // que antes viajaban completas a Node solo para contarlas.
+      const [st] = await prisma.$queryRaw<FilaStats[]>`
+        SELECT ${id}::int AS "serviceId", a.*
+        FROM (${sqlEstadisticas(Prisma.sql`${id}::int`, horas)}) a`;
 
       return {
         serviceId: id,
         ventanaHoras: horas,
-        muestras: total,
-        uptimePct: total === 0 ? null : Number(((ok / total) * 100).toFixed(3)),
-        latenciaPromedioMs: latencias.length
-          ? Math.round(latencias.reduce((a, b) => a + b, 0) / latencias.length)
-          : null,
-        latenciaMinMs: latencias.length ? Math.min(...latencias) : null,
-        latenciaMaxMs: latencias.length ? Math.max(...latencias) : null,
+        ...formatearStats(st),
       };
     },
   );
@@ -104,11 +145,16 @@ export async function registrarRutasServices(app: FastifyInstance): Promise<void
         where: { serviceId: id },
         orderBy: { timestamp: 'desc' },
         take: limit,
-        select: { latenciaMs: true, statusCode: true, timestamp: true },
+        select: { latenciaMs: true, statusCode: true, errorMsg: true, timestamp: true },
       });
 
       // Devolvemos en orden cronologico ascendente para graficar de izq a der.
-      return logs.reverse();
+      return logs.reverse().map((l) => ({
+        latenciaMs: l.latenciaMs,
+        statusCode: l.statusCode,
+        ok: esOk(l),
+        timestamp: l.timestamp,
+      }));
     },
   );
 
@@ -275,6 +321,39 @@ function parseVentanaHoras(window: string | undefined): number {
     default:
       return 24;
   }
+}
+
+/**
+ * Subconsulta de estadisticas de un servicio en las ultimas `horas`.
+ *
+ * Un chequeo es exitoso si NO tiene errorMsg: vale tanto para HTTP (2xx/3xx)
+ * como para TCP (statusCode null por naturaleza). Promedio/min/max solo sobre
+ * exitosos: los fallidos suelen tener latencia = timeout y ensucian el promedio.
+ *
+ * Prisma guarda DateTime como timestamp UTC sin zona; se compara contra now()
+ * en UTC para no depender del TimeZone de la sesion de Postgres.
+ */
+function sqlEstadisticas(serviceId: Prisma.Sql, horas: number): Prisma.Sql {
+  return Prisma.sql`
+    SELECT count(*)::int AS muestras,
+           count(*) FILTER (WHERE error_msg IS NULL)::int AS oks,
+           round(avg(latencia_ms) FILTER (WHERE error_msg IS NULL AND latencia_ms > 0))::int AS promedio,
+           min(latencia_ms) FILTER (WHERE error_msg IS NULL AND latencia_ms > 0) AS minimo,
+           max(latencia_ms) FILTER (WHERE error_msg IS NULL AND latencia_ms > 0) AS maximo
+    FROM logs
+    WHERE service_id = ${serviceId}
+      AND "timestamp" >= (now() AT TIME ZONE 'UTC') - make_interval(hours => ${horas}::int)`;
+}
+
+function formatearStats(st: FilaStats | undefined) {
+  const muestras = st?.muestras ?? 0;
+  return {
+    muestras,
+    uptimePct: muestras === 0 ? null : Number((((st?.oks ?? 0) / muestras) * 100).toFixed(3)),
+    latenciaPromedioMs: st?.promedio ?? null,
+    latenciaMinMs: st?.minimo ?? null,
+    latenciaMaxMs: st?.maximo ?? null,
+  };
 }
 
 // Un chequeo es exitoso si no quedo errorMsg registrado. Esto cubre HTTP
