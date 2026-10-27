@@ -8,14 +8,35 @@ import { sincronizarCierreGlpi } from './stateManager';
 const STATUS_RESUELTO = 5;
 const STATUS_CERRADO = 6;
 
+// Incidentes por ronda (cada 2 min), todos con una sola sesion GLPI.
+const LOTE = 300;
+// Un ticket ya "Resuelto" solo espera a que la mesa lo cierre: basta con
+// revisarlo cada tanto para reflejar el cambio en el portal.
+const REVISAR_RESUELTOS_CADA_MS = 6 * 3_600_000;
+
 type IncidenteSync = Awaited<ReturnType<typeof buscarIncidentes>>[number];
 
+/**
+ * Lote de la ronda. Antes eran 200 incidentes sin orden: con miles de tickets
+ * "Resuelto" pendientes, siempre salian los mismos 200 y el resto (incluidos
+ * los abiertos que habia que reintentar cerrar) nunca se sincronizaba.
+ * Ahora entran los nunca sincronizados y los abiertos, mas los resueltos
+ * revisados hace mas de 6h, del sincronizado hace mas tiempo al mas reciente.
+ */
 function buscarIncidentes() {
   return prisma.incident.findMany({
     where: {
       glpiTicketId: { not: null },
-      OR: [{ glpiEstado: null }, { glpiEstado: { not: STATUS_CERRADO } }],
+      OR: [
+        { glpiEstado: null },
+        { glpiEstado: { lt: STATUS_RESUELTO } },
+        {
+          glpiEstado: STATUS_RESUELTO,
+          glpiEstadoSyncEn: { lt: new Date(Date.now() - REVISAR_RESUELTOS_CADA_MS) },
+        },
+      ],
     },
+    orderBy: { glpiEstadoSyncEn: { sort: 'asc', nulls: 'first' } },
     select: {
       id: true,
       glpiTicketId: true,
@@ -26,7 +47,7 @@ function buscarIncidentes() {
         select: { nombre: true, tipo: true, url: true, host: true, puerto: true, estadoActual: true },
       },
     },
-    take: 200,
+    take: LOTE,
   });
 }
 
@@ -51,12 +72,16 @@ export async function sincronizarEstadosGlpi(): Promise<void> {
 
   if (incidentes.length === 0) return;
 
+  const estados = await glpi.obtenerEstadosTickets(
+    incidentes.map((i) => i.glpiTicketId).filter((id): id is number => id !== null),
+  );
+
   let actualizados = 0;
   let eliminados = 0;
   let reintentados = 0;
   for (const inc of incidentes) {
     if (inc.glpiTicketId === null) continue;
-    const r = await glpi.obtenerEstadoTicket(inc.glpiTicketId);
+    const r = estados.get(inc.glpiTicketId) ?? { tipo: 'error' as const };
 
     if (r.tipo === 'error') continue; // fallo transitorio: se reintenta el proximo ciclo
 

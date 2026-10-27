@@ -229,11 +229,34 @@ class GlpiClient {
    * Nunca lanza.
    */
   async obtenerEstadoTicket(ticketId: number): Promise<EstadoTicketResultado> {
-    if (!this.estaConfigurado()) return { tipo: 'error' };
+    return (await this.obtenerEstadosTickets([ticketId])).get(ticketId) ?? { tipo: 'error' };
+  }
+
+  /**
+   * Igual que obtenerEstadoTicket pero para varios tickets con UNA sola sesion
+   * (la sincronizacion consulta cientos por ronda). Nunca lanza: los tickets
+   * que no se pudieron leer quedan como { tipo: 'error' }.
+   */
+  async obtenerEstadosTickets(ticketIds: number[]): Promise<Map<number, EstadoTicketResultado>> {
+    const resultado = new Map<number, EstadoTicketResultado>();
+    if (!this.estaConfigurado() || ticketIds.length === 0) return resultado;
 
     let session: string | null = null;
     try {
       session = await this.abrirSesion();
+      for (const ticketId of ticketIds) {
+        resultado.set(ticketId, await this.leerTicket(session, ticketId));
+      }
+    } catch (err) {
+      this.logError('obtenerEstadosTickets', err, { tickets: ticketIds.length });
+    } finally {
+      if (session) await this.matarSesion(session);
+    }
+    return resultado;
+  }
+
+  private async leerTicket(session: string, ticketId: number): Promise<EstadoTicketResultado> {
+    try {
       const resp = await this.http.get(`/Ticket/${ticketId}`, {
         headers: this.authHeaders(session),
       });
@@ -255,8 +278,6 @@ class GlpiClient {
     } catch (err) {
       this.logError('obtenerEstadoTicket', err, { ticketId });
       return { tipo: 'error' };
-    } finally {
-      if (session) await this.matarSesion(session);
     }
   }
 
