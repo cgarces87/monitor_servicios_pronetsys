@@ -220,10 +220,22 @@ export async function registrarRutasServices(app: FastifyInstance): Promise<void
       const existe = await prisma.service.findUnique({ where: { id } });
       if (!existe) return reply.code(404).send({ error: 'servicio no encontrado' });
 
+      // Al reanudar: UP, salvo que tenga un incidente abierto (se pauso estando
+      // caido). Ese vuelve como DOWN para que el siguiente chequeo OK pase por
+      // la transicion normal y cierre el incidente y su ticket GLPI; si volviera
+      // como UP, el incidente quedaria abierto para siempre.
+      let reanudarComo: 'UP' | 'DOWN' = 'UP';
+      if (accion === 'resume') {
+        const abierto = await prisma.incident.findFirst({
+          where: { serviceId: id, horaRecuperacion: null },
+          select: { id: true },
+        });
+        if (abierto) reanudarComo = 'DOWN';
+      }
+
       const actualizado = await prisma.service.update({
         where: { id },
-        // Al reanudar lo dejamos en UP; el motor reevalua en el siguiente ciclo.
-        data: { estadoActual: accion === 'pause' ? 'PAUSED' : 'UP' },
+        data: { estadoActual: accion === 'pause' ? 'PAUSED' : reanudarComo },
       });
       return actualizado;
     },

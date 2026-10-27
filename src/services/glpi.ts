@@ -42,15 +42,30 @@ export type CrearTicketInput = {
 export type CerrarTicketInput = {
   ticketId: number;
   solucion: string;
+  // true = el ticket ya tiene la solucion del monitor (un cierre anterior
+  // quedo a medias): solo se fuerza el status final, sin duplicarla.
+  soloEstado?: boolean;
 };
 
+export type SolucionesTicket = {
+  propias: number;      // del usuario del monitor y no rechazadas
+  bloqueantes: number;  // de otro usuario, o rechazadas (el ticket fue reabierto)
+};
+
+// ITILSolution.status en GLPI: 2=en espera, 3=aceptada, 4=rechazada.
+const SOLUCION_RECHAZADA = 4;
+
 export type EstadoTicketResultado =
-  | { tipo: 'ok'; status: number }
+  // creadorId = users_id_recipient (quien abrio el ticket en GLPI).
+  | { tipo: 'ok'; status: number; creadorId: number | null }
   | { tipo: 'no_encontrado' }
   | { tipo: 'error' };
 
 class GlpiClient {
   private http: AxiosInstance;
+  // ID del usuario GLPI dueno del User-Token (el "bot" del monitor). Se
+  // consulta una sola vez por proceso.
+  private usuarioMonitorId: number | null = null;
 
   constructor() {
     this.http = axios.create({
@@ -166,19 +181,21 @@ class GlpiClient {
       const headers = this.authHeaders(session);
 
       // 1) Agregar ITILSolution (esto suele dejar el ticket en estado "Resuelto")
-      const solucion = await this.http.post(
-        '/ITILSolution',
-        {
-          input: {
-            itemtype: 'Ticket',
-            items_id: input.ticketId,
-            content: input.solucion,
+      if (!input.soloEstado) {
+        const solucion = await this.http.post(
+          '/ITILSolution',
+          {
+            input: {
+              itemtype: 'Ticket',
+              items_id: input.ticketId,
+              content: input.solucion,
+            },
           },
-        },
-        { headers },
-      );
-      if (solucion.status < 200 || solucion.status >= 300) {
-        throw new Error(`POST /ITILSolution -> HTTP ${solucion.status} ${JSON.stringify(solucion.data)}`);
+          { headers },
+        );
+        if (solucion.status < 200 || solucion.status >= 300) {
+          throw new Error(`POST /ITILSolution -> HTTP ${solucion.status} ${JSON.stringify(solucion.data)}`);
+        }
       }
 
       // 2) Forzar el status final segun config (defensivo: GLPI podria no haberlo
@@ -231,10 +248,69 @@ class GlpiClient {
         throw new Error(`GET /Ticket/${ticketId} -> HTTP ${resp.status} ${JSON.stringify(resp.data)}`);
       }
       const status = Number(resp.data?.status);
-      return Number.isFinite(status) ? { tipo: 'ok', status } : { tipo: 'error' };
+      const creador = Number(resp.data?.users_id_recipient);
+      return Number.isFinite(status)
+        ? { tipo: 'ok', status, creadorId: Number.isFinite(creador) && creador > 0 ? creador : null }
+        : { tipo: 'error' };
     } catch (err) {
       this.logError('obtenerEstadoTicket', err, { ticketId });
       return { tipo: 'error' };
+    } finally {
+      if (session) await this.matarSesion(session);
+    }
+  }
+
+  /**
+   * ID del usuario GLPI con el que opera el monitor (el que crea los tickets).
+   * null si no se pudo determinar. Nunca lanza.
+   */
+  async idUsuarioMonitor(): Promise<number | null> {
+    if (this.usuarioMonitorId !== null || !this.estaConfigurado()) return this.usuarioMonitorId;
+
+    let session: string | null = null;
+    try {
+      session = await this.abrirSesion();
+      const resp = await this.http.get('/getFullSession', { headers: this.authHeaders(session) });
+      if (resp.status < 200 || resp.status >= 300) {
+        throw new Error(`GET /getFullSession -> HTTP ${resp.status} ${JSON.stringify(resp.data)}`);
+      }
+      const id = Number(resp.data?.session?.glpiID);
+      if (!Number.isFinite(id) || id <= 0) throw new Error('getFullSession sin glpiID');
+      this.usuarioMonitorId = id;
+      return id;
+    } catch (err) {
+      this.logError('idUsuarioMonitor', err);
+      return null;
+    } finally {
+      if (session) await this.matarSesion(session);
+    }
+  }
+
+  /**
+   * Clasifica las soluciones (ITILSolution) del ticket segun su autor y si
+   * fueron rechazadas. null si no se pudo consultar. Nunca lanza.
+   */
+  async revisarSoluciones(ticketId: number): Promise<SolucionesTicket | null> {
+    const monitorId = await this.idUsuarioMonitor();
+    if (monitorId === null) return null;
+
+    let session: string | null = null;
+    try {
+      session = await this.abrirSesion();
+      const resp = await this.http.get(`/Ticket/${ticketId}/ITILSolution`, {
+        headers: this.authHeaders(session),
+      });
+      if (resp.status < 200 || resp.status >= 300) {
+        throw new Error(`GET /Ticket/${ticketId}/ITILSolution -> HTTP ${resp.status} ${JSON.stringify(resp.data)}`);
+      }
+      const lista: Array<{ users_id?: number; status?: number }> = Array.isArray(resp.data) ? resp.data : [];
+      const bloqueantes = lista.filter(
+        (s) => Number(s.users_id) !== monitorId || Number(s.status) === SOLUCION_RECHAZADA,
+      ).length;
+      return { propias: lista.length - bloqueantes, bloqueantes };
+    } catch (err) {
+      this.logError('revisarSoluciones', err, { ticketId });
+      return null;
     } finally {
       if (session) await this.matarSesion(session);
     }

@@ -213,22 +213,28 @@ async function sincronizarAperturaGlpi(
   });
 }
 
-async function sincronizarCierreGlpi(
-  service: Service,
+/**
+ * Marca como resuelto el ticket GLPI de un incidente. Lo usa la transicion a
+ * UP y el reintento de glpiSync. Devuelve si GLPI acepto el cierre.
+ */
+export async function sincronizarCierreGlpi(
+  service: Pick<Service, 'nombre' | 'tipo' | 'url' | 'host' | 'puerto'>,
   incidentId: number,
   ticketId: number,
-): Promise<void> {
+  recuperadoEn: Date = new Date(),
+  soloEstado = false,
+): Promise<boolean> {
   if (!glpi.estaConfigurado()) {
     log.warn(`GLPI no configurado; no resuelvo ticket #${ticketId} aunque el servicio se recupero.`);
-    return;
+    return false;
   }
 
   const solucion =
     `El monitor de Pronetsys detecto la recuperacion automatica del servicio "${service.nombre}" ` +
-    `(${objetivo(service)}) a las ${new Date().toISOString()}. ` +
+    `(${objetivo(service)}) a las ${recuperadoEn.toISOString()}. ` +
     `Este ticket fue resuelto automaticamente por el sistema de monitoreo.`;
 
-  const ok = await glpi.cerrarTicket({ ticketId, solucion });
+  const ok = await glpi.cerrarTicket({ ticketId, solucion, soloEstado });
 
   if (ok) {
     log.info(`Ticket GLPI #${ticketId} marcado como ${process.env.GLPI_AUTO_RESOLVE_AS === 'closed' ? 'cerrado' : 'resuelto'}.`, {
@@ -240,6 +246,7 @@ async function sincronizarCierreGlpi(
       ticketId,
     });
   }
+  return ok;
 }
 
 function armarContenidoTicket(service: Service, detalle: string): string {
